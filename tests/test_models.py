@@ -384,3 +384,92 @@ class TestAnalysisResult:
         assert mask[0] == False  # 0b111 has bit 1  # noqa: E712
         assert mask[1] == True  # 0b101 no bit 1  # noqa: E712
         assert mask[2] == True  # 0b001 no bit 1  # noqa: E712
+
+
+class TestCachedAnalyticsProperty:
+    """Tests for CachedAnalyticsProperty descriptor."""
+
+    def test_cached_analytics_property_returns_bool(self):
+        """CachedAnalyticsProperty returns bool for single vulnerability."""
+        from vulnstate import CVDEvent, CVDVulnerability
+
+        vuln = CVDVulnerability()
+        vuln.apply_event(CVDEvent.X)
+        result = vuln.is_zero_day
+        assert type(result) is bool
+        assert result is True
+
+    def test_cached_analytics_invalidation_on_apply_event(self):
+        """CachedAnalyticsProperty cache invalidates on apply_event."""
+        from vulnstate import CVDEvent, CVDVulnerability
+
+        vuln = CVDVulnerability()
+        vuln.apply_event(CVDEvent.X)
+        _ = vuln.is_zero_day  # Populate cache
+        assert vuln._analytics is not None
+
+        vuln.apply_event(CVDEvent.V)  # State change
+        assert vuln._analytics is None  # Cache invalidated
+
+    def test_cached_analytics_invalidation_on_rollback(self):
+        """CachedAnalyticsProperty cache invalidates on rollback_event."""
+        from vulnstate import CVDEvent, CVDVulnerability
+
+        vuln = CVDVulnerability()
+        vuln.apply_event(CVDEvent.V)
+        vuln.apply_event(CVDEvent.X)
+        _ = vuln.is_zero_day  # Populate cache
+        assert vuln._analytics is not None
+
+        vuln.rollback_event()  # Rollback X
+        assert vuln._analytics is None  # Cache invalidated
+
+    def test_all_analytics_properties_return_bool(self):
+        """All 13 CachedAnalyticsProperty descriptors return bool."""
+        from vulnstate import CVDEvent, CVDVulnerability
+
+        vuln = CVDVulnerability()
+        vuln.apply_event(CVDEvent.V)
+        vuln.apply_event(CVDEvent.F)
+        vuln.apply_event(CVDEvent.X)
+
+        # All 13 properties should return bool
+        properties = [
+            "is_zero_day",
+            "is_zero_day_exploit",
+            "is_zero_day_attack",
+            "is_coordinated",
+            "is_responsible_disclosure",
+            "is_premature_disclosure",
+            "has_fix_before_exploit",
+            "has_fix_before_attack",
+            "has_deployment_before_exploit",
+            "has_deployment_before_attack",
+            "is_private_attack",
+            "is_weaponized",
+            "is_mass_exploitation",
+        ]
+
+        for prop in properties:
+            result = getattr(vuln, prop)
+            assert type(result) is bool, f"{prop} returned {type(result)}, expected bool"
+
+    def test_cached_analytics_property_class_access(self):
+        """Accessing property on class returns descriptor."""
+        from vulnstate import CVDVulnerability
+        from vulnstate.models import CachedAnalyticsProperty
+
+        prop = CVDVulnerability.is_zero_day
+        assert isinstance(prop, CachedAnalyticsProperty)
+
+    def test_cached_analytics_property_is_read_only(self):
+        """CachedAnalyticsProperty raises AttributeError on assignment."""
+        import pytest
+
+        from vulnstate import CVDEvent, CVDVulnerability
+
+        vuln = CVDVulnerability()
+        vuln.apply_event(CVDEvent.V)
+
+        with pytest.raises(AttributeError, match="is_zero_day is read-only"):
+            vuln.is_zero_day = True

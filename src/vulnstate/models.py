@@ -50,7 +50,9 @@ class CachedAnalyticsProperty:
             return self
         if obj._analytics is None:
             obj._compute_analytics()
-        return getattr(obj._analytics, self.attr_name)
+        value = getattr(obj._analytics, self.attr_name)
+        # Return scalar bool for single-item access
+        return bool(value[0])
 
     def __set__(self, obj: Any, value: Any) -> None:
         raise AttributeError(f"{self.attr_name} is read-only")
