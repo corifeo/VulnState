@@ -1,0 +1,122 @@
+{
+  "CVE_data_type": "CVE",
+  "CVE_data_format": "MITRE",
+  "CVE_data_version": "4.0",
+  "CVE_Items": [
+    {
+      "cve": {
+        "CVE_data_meta": {
+          "ID": "CVE-2024-001"
+        },
+        "problemtype": {
+          "problemtype_data": [
+            {
+              "description": [
+                {
+                  "lang": "en",
+                  "value": "CWE-79"
+                }
+              ]
+            }
+          ]
+        },
+        "description": {
+          "description_data": [
+            {
+              "lang": "en",
+              "value": "Cross-site scripting vulnerability"
+            }
+          ]
+        }
+      },
+      "impact": {
+        "baseMetricV3": {
+          "cvssV3": {
+            "version": "3.1",
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
+            "baseScore": 6.1,
+            "baseSeverity": "MEDIUM"
+          },
+          "exploitabilityScore": 2.8,
+          "impactScore": 2.7
+        }
+      }
+    },
+    {
+      "cve": {
+        "CVE_data_meta": {
+          "ID": "CVE-2024-002"
+        },
+        "problemtype": {
+          "problemtype_data": [
+            {
+              "description": [
+                {
+                  "lang": "en",
+                  "value": "CWE-89"
+                }
+              ]
+            }
+          ]
+        },
+        "description": {
+          "description_data": [
+            {
+              "lang": "en",
+              "value": "SQL injection vulnerability"
+            }
+          ]
+        }
+      },
+      "impact": {
+        "baseMetricV3": {
+          "cvssV3": {
+            "version": "3.1",
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+            "baseScore": 9.8,
+            "baseSeverity": "CRITICAL"
+          },
+          "exploitabilityScore": 3.9,
+          "impactScore": 5.9
+        }
+      }
+    },
+    {
+      "cve": {
+        "CVE_data_meta": {
+          "ID": "CVE-2024-005"
+        },
+        "problemtype": {
+          "problemtype_data": [
+            {
+              "description": [
+                {
+                  "lang": "en",
+                  "value": "CWE-120"
+                }
+              ]
+            }
+          ]
+        },
+        "description": {
+          "description_data": [
+            {
+              "lang": "en",
+              "value": "Buffer overflow vulnerability"
+            }
+          ]
+        }
+      },
+      "impact": {
+        "baseMetricV2": {
+          "cvssV2": {
+            "version": "2.0",
+            "vectorString": "AV:N/AC:L/Au:N/C:P/I:P/A:P",
+            "baseScore": 7.5
+          },
+          "severity": "HIGH"
+        }
+      }
+    }
+  ]
+}
