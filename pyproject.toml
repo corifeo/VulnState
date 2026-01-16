@@ -1,0 +1,101 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "vulnstate"
+version = "0.1.0"
+description = "SEI/CMU Coordinated Vulnerability Disclosure (CVD) state machine with numpy optimization for batch operations"
+authors = [{name = "Francesco Manzoni", email = "francesco.manzoni@outlook.com"}]
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+keywords = [
+    "vulnerability",
+    "disclosure",
+    "CVD",
+    "security",
+    "state-machine",
+    "numpy",
+    "coordinated-vulnerability-disclosure",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Topic :: Security",
+    "Topic :: Scientific/Engineering",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Typing :: Typed",
+]
+
+dependencies = [
+    "numpy>=1.20.0",
+    "pandas>=2.0.0",
+    "rich>=13.0.0",
+]
+
+[project.optional-dependencies]
+viz = [
+    "matplotlib>=3.5.0",
+    "networkx>=2.8.0",
+    "seaborn>=0.12.0",
+]
+notebook = [
+    "jupyter>=1.0.0",
+    "matplotlib>=3.5.0",
+    "seaborn>=0.12.0",
+]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
+    "mypy>=1.14.0",
+    "black>=24.0.0",
+    "ruff>=0.8.0",
+]
+all = [
+    "vulnstate[viz,notebook,dev]",
+]
+
+[project.urls]
+Homepage = "https://github.com/cori-o/vulnstate"
+Documentation = "https://github.com/cori-o/vulnstate#readme"
+Repository = "https://github.com/cori-o/vulnstate.git"
+"Bug Tracker" = "https://github.com/cori-o/vulnstate/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vulnstate"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+addopts = "-v --tb=short"
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+ignore_missing_imports = false
+strict = true
+
+[tool.black]
+line-length = 100
+target-version = ['py39']
+include = '\.pyi?$'
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
