@@ -161,9 +161,14 @@ def section_1b_dimension_based_risk():
     table.add_column("Weaponized", style="red")
     table.add_column("Attacked", style="red bold")
 
-    for fix_path in [FixPath.NO_FIX, FixPath.FIX_READY, FixPath.REMEDIATED]:
+    for fix_path in [FixPath.NO_AWARENESS, FixPath.FIX_READY, FixPath.REMEDIATED]:
         row = [fix_path.name]
-        for threat_state in [ThreatState.PRIVATE, ThreatState.PUBLIC, ThreatState.WEAPONIZED, ThreatState.ATTACKED]:
+        for threat_state in [
+            ThreatState.LATENT,
+            ThreatState.DISCLOSED,
+            ThreatState.WEAPONIZED,
+            ThreatState.ACTIVE_THREAT,
+        ]:
             count = ((arr.fix_path == fix_path) & (arr.threat_state == threat_state)).sum()
             row.append(str(count))
         table.add_row(*row)
@@ -173,9 +178,13 @@ def section_1b_dimension_based_risk():
 
     # Priority segments
     console.print("[bold]Risk Priority Segments:[/bold]")
-    critical_risk = arr[(arr.fix_path == FixPath.NO_FIX) & (arr.threat_state >= ThreatState.WEAPONIZED)]
-    high_risk = arr[(arr.fix_path == FixPath.FIX_READY) & (arr.threat_state >= ThreatState.WEAPONIZED)]
-    watch_list = arr[(arr.fix_path < FixPath.REMEDIATED) & (arr.threat_state >= ThreatState.PUBLIC)]
+    critical_risk = arr[
+        (arr.fix_path == FixPath.NO_AWARENESS) & (arr.threat_state >= ThreatState.WEAPONIZED)
+    ]
+    high_risk = arr[
+        (arr.fix_path == FixPath.FIX_READY) & (arr.threat_state >= ThreatState.WEAPONIZED)
+    ]
+    watch_list = arr[(arr.fix_path < FixPath.REMEDIATED) & (arr.threat_state >= ThreatState.DISCLOSED)]
 
     console.print(f"  [red]Critical:[/red] No fix + weaponized/attacked: {len(critical_risk)}")
     console.print(f"  [yellow]High:[/yellow]     Fix ready + weaponized/attacked: {len(high_risk)}")

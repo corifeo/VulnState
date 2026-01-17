@@ -157,11 +157,9 @@ def section_3b_polished_concepts():
         Panel.fit("[bold cyan]Section 3b: Polished Concepts[/bold cyan]", border_style="cyan")
     )
 
-    from vulnstate.constants import FixPath, ThreatState
-
     console.print("[bold]FixPath & ThreatState Dimensions:[/bold]")
-    console.print("  [magenta]FixPath[/magenta] - Progress toward remediation (V→F→D)")
-    console.print("  [magenta]ThreatState[/magenta] - Threat evolution (P→X→A)")
+    console.print("  [magenta]FixPath[/magenta] - Progress toward remediation (V->F->D)")
+    console.print("  [magenta]ThreatState[/magenta] - Threat evolution (P->X->A)")
     console.print()
 
     # Create vulnerability with specific state
@@ -178,16 +176,17 @@ def section_3b_polished_concepts():
     console.print()
 
     console.print("[bold]FixPath Values:[/bold]")
-    console.print("  NO_FIX (0)      - Vendor unaware (v)")
-    console.print("  FIX_READY (1)   - Fix exists but not deployed (VFd)")
-    console.print("  REMEDIATED (2)  - Fix deployed (VFD)")
+    console.print("  NO_AWARENESS (0) - Vendor unaware (vfd)")
+    console.print("  VENDOR_AWARE (1) - Aware, fix in development (Vfd)")
+    console.print("  FIX_READY (3)    - Patch available, not deployed (VFd)")
+    console.print("  REMEDIATED (7)   - Fix deployed to systems (VFD)")
     console.print()
 
     console.print("[bold]ThreatState Values:[/bold]")
-    console.print("  PRIVATE (0)     - Not publicly known (p)")
-    console.print("  PUBLIC (1)      - Public awareness (P)")
-    console.print("  WEAPONIZED (2)  - Exploit available (PX)")
-    console.print("  ATTACKED (3)    - Active exploitation (PXA)")
+    console.print("  LATENT (0)        - No threat activity (pxa)")
+    console.print("  DISCLOSED (1)     - Public awareness, no exploitation (Pxa)")
+    console.print("  WEAPONIZED (3)    - Exploit available (PXa)")
+    console.print("  ACTIVE_THREAT (7) - Full threat materialization (PXA)")
     console.print()
 
 

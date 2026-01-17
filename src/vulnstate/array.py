@@ -469,7 +469,8 @@ class CVDArray:
         """
         warnings.warn(
             "event_timestamps dict is deprecated. Use exploded timestamp arrays "
-            "(V_timestamps, F_timestamps, D_timestamps, P_timestamps, X_timestamps, A_timestamps) instead.",
+            "(V_timestamps, F_timestamps, D_timestamps, P_timestamps, "
+            "X_timestamps, A_timestamps) instead.",
             DeprecationWarning,
             stacklevel=2,
         )

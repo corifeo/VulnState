@@ -5,10 +5,17 @@ Covers serialization (dict, JSON, pickle), file imports (EPSS, KEV, NVD),
 and enrichment operations for both single vulnerabilities and batch arrays.
 """
 
+import json
+import os
 import tempfile
+import time
+from datetime import datetime
 from pathlib import Path
 
-from vulnstate import CVDArray, CVDVulnerability
+import pytest
+
+from vulnstate import CVDArray, CVDEvent, CVDVulnerability
+from vulnstate.io import CVDIO
 
 
 class TestCVDIO:
@@ -16,7 +23,6 @@ class TestCVDIO:
 
     def test_to_dict_single(self):
         """Convert single vulnerability to dict."""
-        from vulnstate.io import CVDIO
 
         vuln = CVDVulnerability("CVE-2024-1234", cvss_score=9.8)
         data = CVDIO.to_dict(vuln)
@@ -27,7 +33,6 @@ class TestCVDIO:
 
     def test_from_dict_single(self):
         """Reconstruct vulnerability from dict."""
-        from vulnstate.io import CVDIO
 
         data = {
             "cve_id": "CVE-2024-5678",
@@ -42,7 +47,6 @@ class TestCVDIO:
 
     def test_to_json_roundtrip(self):
         """JSON roundtrip preserves data."""
-        from vulnstate.io import CVDIO
 
         vuln = CVDVulnerability("CVE-2024-0001", cvss_score=8.5)
         json_str = CVDIO.to_json(vuln)
@@ -53,7 +57,6 @@ class TestCVDIO:
 
     def test_save_load_json_file(self):
         """Save and load JSON file."""
-        from vulnstate.io import CVDIO
 
         vuln = CVDVulnerability("CVE-2024-FILE", cvss_score=6.0)
 
@@ -70,7 +73,6 @@ class TestArrayIO:
 
     def test_array_to_dict_list(self):
         """Convert array to list of dicts."""
-        from vulnstate.io import CVDIO
 
         arr = CVDArray(
             [
@@ -86,7 +88,6 @@ class TestArrayIO:
 
     def test_array_from_dict_list(self):
         """Create array from list of dicts."""
-        from vulnstate.io import CVDIO
 
         data = [
             {"cve_id": "CVE-2024-A", "state": "vfdpxa"},
@@ -103,7 +104,6 @@ class TestEnrichment:
 
     def test_import_epss(self):
         """Import EPSS scores into array."""
-        from vulnstate.io import CVDIO
 
         arr = CVDArray(
             [
@@ -120,7 +120,6 @@ class TestEnrichment:
 
     def test_import_kev(self):
         """Import KEV flags into array."""
-        from vulnstate.io import CVDIO
 
         arr = CVDArray(
             [
@@ -141,7 +140,6 @@ class TestNVDImport:
 
     def test_from_nvd_basic(self):
         """Import basic NVD items."""
-        from vulnstate.io import CVDIO
 
         nvd_items = [
             {
@@ -164,7 +162,6 @@ class TestNVDImport:
 
     def test_from_nvd_with_published_date(self):
         """NVD published date creates P event."""
-        from vulnstate.io import CVDIO
 
         nvd_items = [
             {
@@ -183,14 +180,6 @@ class TestNVDImport:
 # ============================================================================
 # SERIALIZATION TESTS (from test_serialization.py)
 # ============================================================================
-
-import json
-import time
-from datetime import datetime
-
-import pytest
-
-from vulnstate import CVDEvent
 
 
 class TestDictSerialization:
@@ -621,10 +610,6 @@ class TestSerializationEdgeCases:
 # ============================================================================
 # FILE IMPORT TESTS (from test_file_import.py)
 # ============================================================================
-
-import os
-
-from vulnstate.io import CVDIO
 
 # Test data directory
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")

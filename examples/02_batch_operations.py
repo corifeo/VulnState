@@ -189,9 +189,11 @@ def section_3b_dimension_analysis():
     # Count by fix path
     remediated_count = (arr.fix_path == FixPath.REMEDIATED).sum()
     fix_ready_count = (arr.fix_path == FixPath.FIX_READY).sum()
-    no_fix_count = (arr.fix_path == FixPath.NO_FIX).sum()
+    no_fix_count = (arr.fix_path == FixPath.NO_AWARENESS).sum()
 
-    console.print(f"  Remediated (VFD): {remediated_count:,} ({remediated_count/len(arr)*100:.1f}%)")
+    console.print(
+        f"  Remediated (VFD): {remediated_count:,} ({remediated_count/len(arr)*100:.1f}%)"
+    )
     console.print(f"  Fix Ready (VFd):  {fix_ready_count:,} ({fix_ready_count/len(arr)*100:.1f}%)")
     console.print(f"  No Fix (v):       {no_fix_count:,} ({no_fix_count/len(arr)*100:.1f}%)")
     console.print()
@@ -201,13 +203,15 @@ def section_3b_dimension_analysis():
     console.print()
 
     # Count by threat state
-    attacked_count = (arr.threat_state == ThreatState.ATTACKED).sum()
+    attacked_count = (arr.threat_state == ThreatState.ACTIVE_THREAT).sum()
     weaponized_count = (arr.threat_state == ThreatState.WEAPONIZED).sum()
-    public_count = (arr.threat_state == ThreatState.PUBLIC).sum()
-    private_count = (arr.threat_state == ThreatState.PRIVATE).sum()
+    public_count = (arr.threat_state == ThreatState.DISCLOSED).sum()
+    private_count = (arr.threat_state == ThreatState.LATENT).sum()
 
     console.print(f"  Attacked (PXA):   {attacked_count:,} ({attacked_count/len(arr)*100:.1f}%)")
-    console.print(f"  Weaponized (PX):  {weaponized_count:,} ({weaponized_count/len(arr)*100:.1f}%)")
+    console.print(
+        f"  Weaponized (PX):  {weaponized_count:,} ({weaponized_count/len(arr)*100:.1f}%)"
+    )
     console.print(f"  Public (P):       {public_count:,} ({public_count/len(arr)*100:.1f}%)")
     console.print(f"  Private (p):      {private_count:,} ({private_count/len(arr)*100:.1f}%)")
     console.print()
@@ -217,11 +221,13 @@ def section_3b_dimension_analysis():
     console.print()
 
     # High-risk: weaponized threats without fixes
-    high_risk = arr[(arr.fix_path < FixPath.FIX_READY) & (arr.threat_state >= ThreatState.WEAPONIZED)]
+    high_risk = arr[
+        (arr.fix_path < FixPath.FIX_READY) & (arr.threat_state >= ThreatState.WEAPONIZED)
+    ]
     console.print(f"  High risk (no fix + weaponized): {len(high_risk):,}")
 
     # Medium-risk: public but fix ready
-    med_risk = arr[(arr.fix_path == FixPath.FIX_READY) & (arr.threat_state >= ThreatState.PUBLIC)]
+    med_risk = arr[(arr.fix_path == FixPath.FIX_READY) & (arr.threat_state >= ThreatState.DISCLOSED)]
     console.print(f"  Medium risk (fix ready + public): {len(med_risk):,}")
 
     # Low-risk: remediated
