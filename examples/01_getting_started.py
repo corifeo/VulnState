@@ -92,9 +92,7 @@ def section_2_single_vulnerability():
 
     # Second example: incomplete fix cube (VFd - fix ready but not deployed)
     console.print("[yellow]Creating vulnerability with incomplete fix...[/yellow]")
-    vuln2 = CVDVulnerability(
-        "CVE-2024-99999", vendor="Acme Inc", cvss_score=7.2, severity="high"
-    )
+    vuln2 = CVDVulnerability("CVE-2024-99999", vendor="Acme Inc", cvss_score=7.2, severity="high")
     vuln2.apply_event(CVDEvent.V, timestamp=base)
     vuln2.apply_event(CVDEvent.F, timestamp=base + timedelta(days=21))
     vuln2.apply_event(CVDEvent.P, timestamp=base + timedelta(days=7))
@@ -153,6 +151,46 @@ def section_3_state_properties():
     console.print()
 
 
+def section_3b_polished_concepts():
+    """Section 3b: Polished Concepts - FixPath and ThreatState."""
+    console.print(
+        Panel.fit("[bold cyan]Section 3b: Polished Concepts[/bold cyan]", border_style="cyan")
+    )
+
+    from vulnstate.constants import FixPath, ThreatState
+
+    console.print("[bold]FixPath & ThreatState Dimensions:[/bold]")
+    console.print("  [magenta]FixPath[/magenta] - Progress toward remediation (V→F→D)")
+    console.print("  [magenta]ThreatState[/magenta] - Threat evolution (P→X→A)")
+    console.print()
+
+    # Create vulnerability with specific state
+    vuln = CVDVulnerability("CVE-2024-DEMO", cvss_score=8.2)
+    vuln.apply_event(CVDEvent.V, timestamp=datetime(2024, 1, 1))
+    vuln.apply_event(CVDEvent.F, timestamp=datetime(2024, 1, 15))
+    vuln.apply_event(CVDEvent.P, timestamp=datetime(2024, 1, 10))
+    vuln.apply_event(CVDEvent.X, timestamp=datetime(2024, 1, 12))
+
+    console.print("[yellow]Example vulnerability (VFdPXa):[/yellow]")
+    console.print(f"  State:        {vuln.state}")
+    console.print(f"  Fix Path:     {vuln.fix_path} ({vuln.fix_path.name})")
+    console.print(f"  Threat State: {vuln.threat_state} ({vuln.threat_state.name})")
+    console.print()
+
+    console.print("[bold]FixPath Values:[/bold]")
+    console.print("  NO_FIX (0)      - Vendor unaware (v)")
+    console.print("  FIX_READY (1)   - Fix exists but not deployed (VFd)")
+    console.print("  REMEDIATED (2)  - Fix deployed (VFD)")
+    console.print()
+
+    console.print("[bold]ThreatState Values:[/bold]")
+    console.print("  PRIVATE (0)     - Not publicly known (p)")
+    console.print("  PUBLIC (1)      - Public awareness (P)")
+    console.print("  WEAPONIZED (2)  - Exploit available (PX)")
+    console.print("  ATTACKED (3)    - Active exploitation (PXA)")
+    console.print()
+
+
 def section_4_batch_operations():
     """Section 4: Working with multiple vulnerabilities."""
     console.print(
@@ -196,9 +234,7 @@ def section_4_batch_operations():
 
 def section_5_serialization():
     """Section 5: Serialization and export."""
-    console.print(
-        Panel.fit("[bold cyan]Section 5: Serialization[/bold cyan]", border_style="cyan")
-    )
+    console.print(Panel.fit("[bold cyan]Section 5: Serialization[/bold cyan]", border_style="cyan"))
 
     # Create sample data
     vulns = []
@@ -250,6 +286,7 @@ def main():
     section_1_introduction()
     section_2_single_vulnerability()
     section_3_state_properties()
+    section_3b_polished_concepts()
     section_4_batch_operations()
     section_5_serialization()
     section_6_next_steps()

@@ -54,9 +54,7 @@ def create_base_dataset(size: int = 50) -> CVDArray:
 def section_1_creating_vulnerabilities():
     """Section 1: Creating vulnerabilities from scratch."""
     console.print(
-        Panel.fit(
-            "[bold cyan]Section 1: Creating Vulnerabilities[/bold cyan]", border_style="cyan"
-        )
+        Panel.fit("[bold cyan]Section 1: Creating Vulnerabilities[/bold cyan]", border_style="cyan")
     )
     console.print()
 
@@ -102,7 +100,9 @@ def section_2_epss_enrichment():
     console.print("  Range: 0.0 (unlikely) to 1.0 (highly likely)")
     console.print()
 
-    console.print("[bold magenta]Method: arr.import_epss(epss_data: Dict[str, float])[/bold magenta]")
+    console.print(
+        "[bold magenta]Method: arr.import_epss(epss_data: Dict[str, float])[/bold magenta]"
+    )
     console.print()
 
     # Simulate EPSS data (in real usage, load from FIRST.org API or CSV)
@@ -130,7 +130,11 @@ def section_2_epss_enrichment():
     for i in range(5):
         vuln = arr.get(i)
         epss = vuln.epss or 0.0
-        risk = "[red]HIGH[/red]" if epss > 0.5 else "[yellow]MEDIUM[/yellow]" if epss > 0.1 else "[green]LOW[/green]"
+        risk = (
+            "[red]HIGH[/red]"
+            if epss > 0.5
+            else "[yellow]MEDIUM[/yellow]" if epss > 0.1 else "[green]LOW[/green]"
+        )
         table.add_row(vuln.cve_id, f"{vuln.cvss_score:.1f}", f"{epss:.4f}", risk)
 
     console.print(table)
@@ -274,6 +278,62 @@ def section_4_combined_enrichment():
     console.print()
 
 
+def section_4b_dimension_based_filtering():
+    """Section 4b: Risk segmentation using dimensions."""
+    console.print(
+        Panel.fit(
+            "[bold cyan]Section 4b: Risk Segmentation by Dimension[/bold cyan]", border_style="cyan"
+        )
+    )
+    console.print()
+
+    from vulnstate.constants import FixPath, ThreatState
+
+    # Create enriched dataset
+    arr = create_base_dataset(100)
+    epss_data = {f"CVE-2024-{i:05d}": round(random.uniform(0.01, 0.8), 4) for i in range(100)}
+    arr.import_epss(epss_data)
+    kev_cves = {f"CVE-2024-{i:05d}" for i in range(0, 100, 10)}
+    arr.import_kev(kev_cves)
+
+    console.print("[bold]Dimension-Based Risk Segmentation:[/bold]")
+    console.print("[magenta].fix_path, .threat_state -> filter by remediation and threat[/magenta]")
+    console.print()
+
+    # High risk: no fix + weaponized
+    high_risk = arr[
+        (arr.fix_path < FixPath.FIX_READY) &
+        (arr.threat_state >= ThreatState.WEAPONIZED)
+    ]
+    console.print(f"  [red]High risk[/red] (no fix + weaponized): {len(high_risk)}")
+
+    # Medium risk: fix ready but public
+    med_risk = arr[
+        (arr.fix_path == FixPath.FIX_READY) &
+        (arr.threat_state >= ThreatState.PUBLIC)
+    ]
+    console.print(f"  [yellow]Medium risk[/yellow] (fix ready + public): {len(med_risk)}")
+
+    # Low risk: remediated
+    low_risk = arr[arr.fix_path == FixPath.REMEDIATED]
+    console.print(f"  [green]Low risk[/green] (remediated): {len(low_risk)}")
+    console.print()
+
+    console.print("[bold]Priority Focus: KEV + High Threat State:[/bold]")
+    priority = []
+    for i in range(len(arr)):
+        vuln = arr.get(i)
+        if vuln.is_kev and vuln.threat_state >= ThreatState.WEAPONIZED:
+            priority.append(vuln)
+
+    console.print(f"  KEV entries with weaponized threat: {len(priority)}")
+    if priority:
+        console.print("\n  [bold]Top Priority Items:[/bold]")
+        for vuln in priority[:3]:
+            console.print(f"    {vuln.cve_id}: {vuln.state} (CVSS {vuln.cvss_score})")
+    console.print()
+
+
 def section_5_export_options():
     """Section 5: Export options."""
     console.print(
@@ -328,9 +388,12 @@ def main():
     section_2_epss_enrichment()
     section_3_kev_enrichment()
     section_4_combined_enrichment()
+    section_4b_dimension_based_filtering()
     section_5_export_options()
 
-    console.print(Panel.fit("[bold green]Data Import Demo Complete![/bold green]", border_style="green"))
+    console.print(
+        Panel.fit("[bold green]Data Import Demo Complete![/bold green]", border_style="green")
+    )
     console.print()
     console.print("  data_science_workflow.ipynb - Statistical analysis notebook")
     console.print("  security_analysis.ipynb     - Risk assessment notebook")

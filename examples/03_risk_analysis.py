@@ -46,6 +46,7 @@ def arr_to_dataframe(arr: CVDArray) -> pd.DataFrame:
         records.append(record)
     return pd.DataFrame(records)
 
+
 console = Console()
 
 
@@ -134,6 +135,51 @@ def section_1_portfolio_overview():
         count = int(df[event].sum())
         pct = count / len(df) * 100
         console.print(f"  {event} ({description:.<15}) {count:>4} ({pct:>5.1f}%)")
+    console.print()
+
+
+def section_1b_dimension_based_risk():
+    """Section 1b: Risk analysis using FixPath and ThreatState."""
+    console.print(
+        Panel.fit("[bold cyan]Section 1b: Dimension-Based Risk[/bold cyan]", border_style="cyan")
+    )
+
+    from vulnstate.constants import FixPath, ThreatState
+
+    arr = create_sample_dataset(500)
+    console.print("[yellow]Analyzing risk using FixPath and ThreatState dimensions...[/yellow]\n")
+
+    console.print("[bold]Risk Matrix (FixPath × ThreatState):[/bold]")
+    console.print("[magenta].fix_path, .threat_state -> dimension arrays[/magenta]")
+    console.print()
+
+    # Create risk matrix
+    table = Table(title="Vulnerability Distribution by Dimension")
+    table.add_column("Fix Path \\ Threat", style="cyan")
+    table.add_column("Private", style="green")
+    table.add_column("Public", style="yellow")
+    table.add_column("Weaponized", style="red")
+    table.add_column("Attacked", style="red bold")
+
+    for fix_path in [FixPath.NO_FIX, FixPath.FIX_READY, FixPath.REMEDIATED]:
+        row = [fix_path.name]
+        for threat_state in [ThreatState.PRIVATE, ThreatState.PUBLIC, ThreatState.WEAPONIZED, ThreatState.ATTACKED]:
+            count = ((arr.fix_path == fix_path) & (arr.threat_state == threat_state)).sum()
+            row.append(str(count))
+        table.add_row(*row)
+
+    console.print(table)
+    console.print()
+
+    # Priority segments
+    console.print("[bold]Risk Priority Segments:[/bold]")
+    critical_risk = arr[(arr.fix_path == FixPath.NO_FIX) & (arr.threat_state >= ThreatState.WEAPONIZED)]
+    high_risk = arr[(arr.fix_path == FixPath.FIX_READY) & (arr.threat_state >= ThreatState.WEAPONIZED)]
+    watch_list = arr[(arr.fix_path < FixPath.REMEDIATED) & (arr.threat_state >= ThreatState.PUBLIC)]
+
+    console.print(f"  [red]Critical:[/red] No fix + weaponized/attacked: {len(critical_risk)}")
+    console.print(f"  [yellow]High:[/yellow]     Fix ready + weaponized/attacked: {len(high_risk)}")
+    console.print(f"  [blue]Watch:[/blue]    Unpatched + public: {len(watch_list)}")
     console.print()
 
 
@@ -284,6 +330,7 @@ def main():
     console.print()
 
     section_1_portfolio_overview()
+    section_1b_dimension_based_risk()
     section_2_risk_tiers()
     section_3_vendor_analysis()
     section_4_export_for_reporting()

@@ -77,9 +77,17 @@ def section_1_creating_arrays():
 
     # Factory methods
     console.print("[bold]Factory Methods:[/bold]")
-    console.print("[magenta]CVDArray.zeros(n) -> CVDArray[/magenta] - create n items in initial state (vfdpxa)")
-    console.print("[magenta]CVDArray.ones(n) -> CVDArray[/magenta] - create n items in terminal state (VFDPXA)")
-    console.print("[magenta]CVDArray.random(n) -> CVDArray[/magenta] - create n items with random states")
+    console.print(
+        "[magenta]CVDArray.zeros(n) -> CVDArray[/magenta] - "
+        "create n items in initial state (vfdpxa)"
+    )
+    console.print(
+        "[magenta]CVDArray.ones(n) -> CVDArray[/magenta] - "
+        "create n items in terminal state (VFDPXA)"
+    )
+    console.print(
+        "[magenta]CVDArray.random(n) -> CVDArray[/magenta] - create n items with random states"
+    )
     console.print()
 
     zeros = CVDArray.zeros(5, vuln_id_prefix="INIT")
@@ -164,6 +172,64 @@ def section_3_state_distribution():
     console.print()
 
 
+def section_3b_dimension_analysis():
+    """Section 3b: Dimension-based analysis using FixPath and ThreatState."""
+    console.print(
+        Panel.fit("[bold cyan]Section 3b: Dimension Analysis[/bold cyan]", border_style="cyan")
+    )
+
+    from vulnstate.constants import FixPath, ThreatState
+
+    arr = create_sample_dataset(5000)
+
+    console.print("[bold]FixPath Distribution:[/bold]")
+    console.print("[magenta].fix_path -> np.ndarray[FixPath][/magenta]")
+    console.print()
+
+    # Count by fix path
+    remediated_count = (arr.fix_path == FixPath.REMEDIATED).sum()
+    fix_ready_count = (arr.fix_path == FixPath.FIX_READY).sum()
+    no_fix_count = (arr.fix_path == FixPath.NO_FIX).sum()
+
+    console.print(f"  Remediated (VFD): {remediated_count:,} ({remediated_count/len(arr)*100:.1f}%)")
+    console.print(f"  Fix Ready (VFd):  {fix_ready_count:,} ({fix_ready_count/len(arr)*100:.1f}%)")
+    console.print(f"  No Fix (v):       {no_fix_count:,} ({no_fix_count/len(arr)*100:.1f}%)")
+    console.print()
+
+    console.print("[bold]ThreatState Distribution:[/bold]")
+    console.print("[magenta].threat_state -> np.ndarray[ThreatState][/magenta]")
+    console.print()
+
+    # Count by threat state
+    attacked_count = (arr.threat_state == ThreatState.ATTACKED).sum()
+    weaponized_count = (arr.threat_state == ThreatState.WEAPONIZED).sum()
+    public_count = (arr.threat_state == ThreatState.PUBLIC).sum()
+    private_count = (arr.threat_state == ThreatState.PRIVATE).sum()
+
+    console.print(f"  Attacked (PXA):   {attacked_count:,} ({attacked_count/len(arr)*100:.1f}%)")
+    console.print(f"  Weaponized (PX):  {weaponized_count:,} ({weaponized_count/len(arr)*100:.1f}%)")
+    console.print(f"  Public (P):       {public_count:,} ({public_count/len(arr)*100:.1f}%)")
+    console.print(f"  Private (p):      {private_count:,} ({private_count/len(arr)*100:.1f}%)")
+    console.print()
+
+    console.print("[bold]Risk Filtering by Dimension:[/bold]")
+    console.print("[dim]Combine fix_path and threat_state for risk segmentation[/dim]")
+    console.print()
+
+    # High-risk: weaponized threats without fixes
+    high_risk = arr[(arr.fix_path < FixPath.FIX_READY) & (arr.threat_state >= ThreatState.WEAPONIZED)]
+    console.print(f"  High risk (no fix + weaponized): {len(high_risk):,}")
+
+    # Medium-risk: public but fix ready
+    med_risk = arr[(arr.fix_path == FixPath.FIX_READY) & (arr.threat_state >= ThreatState.PUBLIC)]
+    console.print(f"  Medium risk (fix ready + public): {len(med_risk):,}")
+
+    # Low-risk: remediated
+    low_risk = arr[arr.fix_path == FixPath.REMEDIATED]
+    console.print(f"  Low risk (remediated): {len(low_risk):,}")
+    console.print()
+
+
 def section_4_batch_event_application():
     """Section 4: Applying events to many items at once."""
     console.print(
@@ -202,9 +268,7 @@ def section_4_batch_event_application():
 
 def section_5_serialization():
     """Section 5: Serialization and export."""
-    console.print(
-        Panel.fit("[bold cyan]Section 5: Serialization[/bold cyan]", border_style="cyan")
-    )
+    console.print(Panel.fit("[bold cyan]Section 5: Serialization[/bold cyan]", border_style="cyan"))
 
     arr = create_sample_dataset(100)
     console.print("[bold magenta]Export Methods:[/bold magenta]")
@@ -254,6 +318,7 @@ def main():
     section_1_creating_arrays()
     section_2_boolean_masking()
     section_3_state_distribution()
+    section_3b_dimension_analysis()
     section_4_batch_event_application()
     section_5_serialization()
 
