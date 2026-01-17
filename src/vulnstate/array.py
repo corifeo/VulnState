@@ -115,8 +115,8 @@ class CVDArray:
 
         # Initialize analytics arrays (will be filled by sync)
         self.analytics.severities = np.empty(n, dtype=object)
-        self.analytics.cubes = np.empty(n, dtype=object)
-        self.analytics.fix_stages = np.empty(n, dtype=object)
+        self.analytics.fix_path = np.empty(n, dtype=np.uint8)
+        self.analytics.threat_state = np.empty(n, dtype=np.uint8)
         self.analytics.is_zero_day = np.zeros(n, dtype=bool)
         self.analytics.is_fix_available = np.zeros(n, dtype=bool)
         self.analytics.is_fix_deployed = np.zeros(n, dtype=bool)
@@ -267,78 +267,161 @@ class CVDArray:
 
     @property
     def severities(self) -> np.ndarray:
-        """Get severities analytics array."""
+        """Get severities analytics array.
+
+        Note: Severities are stored in ArrayAnalytics, not computed by CVDAnalyzer.
+        """
         return self.analytics.severities
 
     @property
-    def cubes(self) -> np.ndarray:
-        """Get cubes analytics array."""
-        return self.analytics.cubes
+    def fix_path(self) -> np.ndarray:
+        """Get fix path as uint8 array (FixPath enum values).
+
+        Reads from AnalysisResult.fix_path_int computed by CVDAnalyzer.
+        """
+        return self.analysis.fix_path_int
 
     @property
-    def fix_stages(self) -> np.ndarray:
-        """Get fix stages analytics array."""
-        return self.analytics.fix_stages
+    def threat_state(self) -> np.ndarray:
+        """Get threat state as uint8 array (ThreatState enum values).
+
+        Reads from AnalysisResult.threat_state_int computed by CVDAnalyzer.
+        """
+        return self.analysis.threat_state_int
+
+    @property
+    def cubes(self) -> np.ndarray:
+        """Deprecated: Use fix_path instead."""
+        import warnings
+
+        warnings.warn("cubes is deprecated, use fix_path", DeprecationWarning, stacklevel=2)
+        return self.fix_path
 
     @property
     def is_zero_day(self) -> np.ndarray:
-        """Get is_zero_day analytics array."""
-        return self.analytics.is_zero_day
+        """Get is_zero_day analytics array.
+
+        Reads from AnalysisResult.is_zero_day computed by CVDAnalyzer.
+        True if exploit (X) or attack (A) occurred before vendor awareness (V).
+        """
+        return self.analysis.is_zero_day
 
     @property
     def is_fix_available(self) -> np.ndarray:
-        """Get is_fix_available analytics array."""
-        return self.analytics.is_fix_available
+        """Check if fix is available (F event occurred).
+
+        Derived from state bits: True if F bit is set.
+        """
+        return self.has_event_occurred(CVDEvent.F)
 
     @property
     def is_fix_deployed(self) -> np.ndarray:
-        """Get is_fix_deployed analytics array."""
-        return self.analytics.is_fix_deployed
+        """Check if fix is deployed (D event occurred).
+
+        Derived from state bits: True if D bit is set.
+        """
+        return self.has_event_occurred(CVDEvent.D)
 
     @property
     def has_public_exploit(self) -> np.ndarray:
-        """Get has_public_exploit analytics array."""
-        return self.analytics.has_public_exploit
+        """Check if public exploit exists (X event occurred).
+
+        Reads from AnalysisResult.is_weaponized computed by CVDAnalyzer.
+        """
+        return self.analysis.is_weaponized
 
     @property
     def is_under_attack(self) -> np.ndarray:
-        """Get is_under_attack analytics array."""
-        return self.analytics.is_under_attack
+        """Check if under active attack (A event occurred).
+
+        Derived from state bits: True if A bit is set.
+        """
+        return self.has_event_occurred(CVDEvent.A)
 
     @property
     def premature_disclosure(self) -> np.ndarray:
-        """Get premature_disclosure analytics array."""
-        return self.analytics.premature_disclosure
+        """Get premature_disclosure analytics array.
+
+        Reads from AnalysisResult.is_premature_disclosure computed by CVDAnalyzer.
+        True if P occurred before F (disclosure before fix ready).
+        """
+        return self.analysis.is_premature_disclosure
 
     @property
     def disclosure_window_days(self) -> np.ndarray:
-        """Get disclosure_window_days analytics array."""
-        return self.analytics.disclosure_window_days
+        """Get disclosure_window_days analytics array.
+
+        Reads from AnalysisResult.disclosure_window_days computed by CVDAnalyzer.
+        Days between V (vendor awareness) and P (public disclosure).
+        """
+        return self.analysis.disclosure_window_days
 
     @property
     def fix_lag_days(self) -> np.ndarray:
-        """Get fix_lag_days analytics array."""
-        return self.analytics.fix_lag_days
+        """Get fix_lag_days analytics array.
+
+        Reads from AnalysisResult.fix_lag_days computed by CVDAnalyzer.
+        Days between V (vendor awareness) and F (fix ready).
+        """
+        return self.analysis.fix_lag_days
 
     @property
     def deployment_lag_days(self) -> np.ndarray:
-        """Get deployment_lag_days analytics array."""
-        return self.analytics.deployment_lag_days
+        """Get deployment_lag_days analytics array.
+
+        Reads from AnalysisResult.deployment_lag_days computed by CVDAnalyzer.
+        Days between F (fix ready) and D (fix deployed).
+        """
+        return self.analysis.deployment_lag_days
 
     @property
     def violated_orderings_count(self) -> np.ndarray:
-        """Get violated_orderings_count analytics array."""
-        return self.analytics.violated_orderings_count
+        """Get count of violated ordering constraints.
+
+        Computed from anti_desiderata_mask by counting set bits.
+        """
+        # Count bits set in anti_desiderata_mask
+        mask = self.analysis.anti_desiderata_mask
+        count = np.zeros(len(mask), dtype=np.int32)
+        for i in range(12):  # 12 desiderata pairs
+            count += ((mask >> i) & 1).astype(np.int32)
+        return count
 
     @property
     def desiderata_scores(self) -> np.ndarray:
-        """Get desiderata_scores analytics array."""
-        return self.analytics.desiderata_scores
+        """Get desiderata_scores analytics array (0.0 to 1.0).
+
+        Reads from AnalysisResult.desiderata_score computed by CVDAnalyzer.
+        Fraction of satisfied desiderata (desiderata_count / 12).
+        """
+        return self.analysis.desiderata_score
+
+    @property
+    def desiderata_mask(self) -> np.ndarray:
+        """Get desiderata satisfaction as uint16 bitmask array.
+
+        Reads from AnalysisResult.desiderata_mask computed by CVDAnalyzer.
+        Each bit corresponds to a DesiderataBit. Use bitwise ops for filtering:
+            arr.desiderata_mask & (1 << DesiderataBit.D1_V_P)
+        """
+        return self.analysis.desiderata_mask
+
+    @property
+    def anti_desiderata_mask(self) -> np.ndarray:
+        """Get anti-desiderata (violations) as uint16 bitmask array.
+
+        Reads from AnalysisResult.anti_desiderata_mask computed by CVDAnalyzer.
+        Each bit corresponds to an AntiDesiderataBit.
+        """
+        return self.analysis.anti_desiderata_mask
 
     @property
     def skill_scores(self) -> np.ndarray:
-        """Get skill_scores analytics array."""
-        return self.analytics.skill_scores
+        """Get skill_scores analytics array.
+
+        Reads from AnalysisResult.skill_score computed by CVDAnalyzer.
+        """
+        return self.analysis.skill_score
 
     @property
     def _metadata_raw(self) -> dict[str, np.ndarray]:

@@ -800,5 +800,67 @@ class TestGetMethod:
             arr.get(-10)
 
 
+class TestFixPathProperty:
+    """Test CVDArray.fix_path property."""
+
+    def test_fix_path_dtype(self):
+        """fix_path returns uint8 array."""
+        arr = CVDArray.random(100)
+        assert arr.fix_path.dtype == np.uint8
+
+    def test_fix_path_valid_values(self):
+        """fix_path values are valid FixPath enum values (0, 1, 3, 7)."""
+        arr = CVDArray.random(100)
+        valid_values = {0, 1, 3, 7}  # NO_AWARENESS, VENDOR_AWARE, FIX_READY, REMEDIATED
+        assert all(v in valid_values for v in arr.fix_path)
+
+    def test_fix_path_length_matches_array(self):
+        """fix_path array length matches CVDArray length."""
+        arr = CVDArray.random(50)
+        assert len(arr.fix_path) == len(arr)
+
+
+class TestThreatStateProperty:
+    """Test CVDArray.threat_state property."""
+
+    def test_threat_state_dtype(self):
+        """threat_state returns uint8 array."""
+        arr = CVDArray.random(100)
+        assert arr.threat_state.dtype == np.uint8
+
+    def test_threat_state_valid_values(self):
+        """threat_state values are 3-bit values (0-7)."""
+        arr = CVDArray.random(100)
+        # PXA bits can be any 3-bit value (0-7)
+        # ThreatState enum covers common cases (0,1,3,4,5,7)
+        # Values 2 (pXa) and 6 (pXA) are also valid states
+        assert all(0 <= v <= 7 for v in arr.threat_state)
+
+    def test_threat_state_length_matches_array(self):
+        """threat_state array length matches CVDArray length."""
+        arr = CVDArray.random(50)
+        assert len(arr.threat_state) == len(arr)
+
+
+class TestDesiderataMaskProperty:
+    """Test CVDArray.desiderata_mask property (via analysis)."""
+
+    def test_desiderata_mask_dtype(self):
+        """desiderata_mask returns uint16 array."""
+        arr = CVDArray.random(100)
+        assert arr.analysis.desiderata_mask.dtype == np.uint16
+
+    def test_desiderata_mask_length_matches_array(self):
+        """desiderata_mask array length matches CVDArray length."""
+        arr = CVDArray.random(50)
+        assert len(arr.analysis.desiderata_mask) == len(arr)
+
+    def test_desiderata_mask_max_value(self):
+        """desiderata_mask values fit in 15 bits (15 event pairs)."""
+        arr = CVDArray.random(100)
+        # 15 pairs means max value is 2^15 - 1 = 32767
+        assert all(v <= 0x7FFF for v in arr.analysis.desiderata_mask)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

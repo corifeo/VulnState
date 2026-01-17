@@ -129,8 +129,10 @@ class VulnerabilityAnalytics:
 
     # Categorical analytics
     severity: Optional[str] = None  # none, low, medium, high, critical
-    cube: str = "vfd"  # vfd, Vfd, VFd, VFD
-    fix_stage: str = "no_awareness"  # no_awareness, aware, ready, deployed
+    fix_path: int = (
+        0  # FixPath enum value (0=NO_AWARENESS, 1=VENDOR_AWARE, 3=FIX_READY, 7=REMEDIATED)
+    )
+    threat_state: int = 0  # ThreatState enum value
 
     # Boolean analytics
     is_zero_day: bool = False
@@ -147,8 +149,9 @@ class VulnerabilityAnalytics:
 
     # Research tier analytics
     violated_orderings_count: int = 0
-    desiderata_satisfied: dict[str, bool] = field(default_factory=dict)
-    desiderata_score: float = 0.0
+    desiderata_mask: int = 0  # uint16 bitmask
+    anti_desiderata_mask: int = 0  # uint16 bitmask
+    desiderata_count: int = 0  # Count of satisfied (popcount of mask)
     skill_score: Optional[float] = None
 
 
@@ -506,10 +509,14 @@ class AnalysisResult:
 class ArrayAnalytics:
     """Cached analytics arrays (15 analytics fields)."""
 
-    # Categorical fields (object dtype, will be converted to pd.Categorical)
+    # Categorical fields
     severities: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
-    cubes: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
-    fix_stages: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
+    fix_path: np.ndarray = field(
+        default_factory=lambda: np.array([], dtype=np.uint8)
+    )  # FixPath enum values
+    threat_state: np.ndarray = field(
+        default_factory=lambda: np.array([], dtype=np.uint8)
+    )  # ThreatState enum values
 
     # Boolean flags
     is_zero_day: np.ndarray = field(default_factory=lambda: np.array([], dtype=bool))
@@ -526,12 +533,26 @@ class ArrayAnalytics:
     fix_lag_days: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
     deployment_lag_days: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
     desiderata_scores: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
+
+    # Bitmask fields (uint16 for 12 bits)
+    desiderata_mask: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.uint16))
+    anti_desiderata_mask: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.uint16))
+
     skill_scores: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
 
     # Integer count
     violated_orderings_count: np.ndarray = field(
         default_factory=lambda: np.array([], dtype=np.int32)
     )
+
+    # Deprecated alias for backward compatibility
+    @property
+    def cubes(self) -> np.ndarray:
+        """Deprecated: Use fix_path instead."""
+        import warnings
+
+        warnings.warn("cubes is deprecated, use fix_path", DeprecationWarning, stacklevel=2)
+        return self.fix_path
 
 
 @dataclass
