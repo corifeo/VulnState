@@ -1119,22 +1119,34 @@ class CVDArray:
 
     # ==================== DATA IMPORT ====================
 
-    def import_epss(self, epss_data: dict[str, float]) -> None:
+    def import_epss(
+        self,
+        source: Union[str, dict[str, Union[float, dict[str, Any]]]],
+        import_metadata: bool = False,
+        include: Optional[list[str]] = None,
+        exclude: Optional[list[str]] = None,
+    ) -> None:
         """
-        Import EPSS (Exploit Prediction Scoring System) scores from dictionary.
+        Import EPSS (Exploit Prediction Scoring System) data.
 
         Delegates to CVDIO for implementation.
 
         Args:
-            epss_data: Dictionary mapping CVE IDs to EPSS scores (0.0-1.0)
+            source: Filepath to EPSS CSV or dict mapping CVE IDs to EPSS data
+            import_metadata: Store full EPSS data in vuln.metadata['epss'] (default False)
+            include: Only store these fields (if import_metadata=True)
+            exclude: Skip these fields (if import_metadata=True)
 
         Example:
             >>> epss_scores = {'CVE-2024-001': 0.85, 'CVE-2024-002': 0.42}
             >>> arr.import_epss(epss_scores)
+            >>> # With metadata
+            >>> epss_data = {'CVE-2024-001': {'score': 0.85, 'percentile': 0.95}}
+            >>> arr.import_epss(epss_data, import_metadata=True)
         """
         from .io import CVDIO
 
-        CVDIO.import_epss(self, epss_data)
+        CVDIO.import_epss(self, source, import_metadata=import_metadata, include=include, exclude=exclude)
 
     def import_kev(
         self,
@@ -1277,7 +1289,13 @@ class CVDArray:
 
     # ==================== FILE-BASED IMPORT CONVENIENCE METHODS ====================
 
-    def import_epss_file(self, filepath: str) -> None:
+    def import_epss_file(
+        self,
+        filepath: str,
+        import_metadata: bool = False,
+        include: Optional[list[str]] = None,
+        exclude: Optional[list[str]] = None,
+    ) -> None:
         """
         Import EPSS scores from CSV file (convenience wrapper).
 
@@ -1285,13 +1303,16 @@ class CVDArray:
 
         Args:
             filepath: Path to EPSS CSV file
+            import_metadata: Store full EPSS data in vuln.metadata['epss'] (default False)
+            include: Only store these fields (if import_metadata=True)
+            exclude: Skip these fields (if import_metadata=True)
 
         Example:
             >>> arr.import_epss_file('data/epss_scores.csv')
         """
         from .io import CVDIO
 
-        CVDIO.import_epss_file(self, filepath)
+        CVDIO.import_epss_file(self, filepath, import_metadata=import_metadata, include=include, exclude=exclude)
 
     def import_kev_file(
         self,

@@ -231,37 +231,103 @@ class CVDIO:
     # ==================== ENRICHMENT IMPORT ====================
 
     @staticmethod
-    def import_epss(arr: "CVDArray", epss_data: dict[str, float]) -> None:
-        """Import EPSS scores into array.
+    def import_epss(
+        arr: "CVDArray",
+        source: Union[str, dict[str, Union[float, dict[str, Any]]]],
+        import_metadata: bool = False,
+        include: Optional[list[str]] = None,
+        exclude: Optional[list[str]] = None,
+    ) -> None:
+        """
+        Import EPSS (Exploit Prediction Scoring System) data.
 
         Args:
             arr: CVDArray instance to update
-            epss_data: Dictionary mapping CVE IDs to EPSS scores (0.0-1.0)
+            source: Filepath to EPSS CSV or dict mapping CVE IDs to EPSS data
+            import_metadata: Store full EPSS data in vuln.metadata['epss'] (default False)
+            include: Only store these fields (if import_metadata=True)
+            exclude: Skip these fields (if import_metadata=True)
+
+        Note:
+            Score is always stored in enrichment.epss for performance.
+            Metadata storage is optional for preserving percentile and other fields.
         """
+        import csv
+
         import numpy as np
 
+        # Parse source
+        if isinstance(source, str):
+            # Read from CSV file
+            epss_data: dict[str, dict[str, Any]] = {}
+            with open(source) as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    cve_id = row["cve"]
+                    epss_data[cve_id] = {
+                        "score": float(row["epss"]),
+                        "percentile": float(row["percentile"]),
+                    }
+        else:
+            # Handle dict input - normalize to dict[str, dict] format
+            epss_data = {}
+            for cve_id, value in source.items():
+                if isinstance(value, dict):
+                    epss_data[cve_id] = value
+                else:
+                    # Legacy float format
+                    epss_data[cve_id] = {"score": float(value)}
+
+        # Initialize epss metadata if needed
         if "epss" not in arr._metadata_raw:
             arr._metadata_raw["epss"] = np.full(len(arr), np.nan, dtype=np.float32)
 
+        # Get CVE IDs from array
         if "_cve_id" not in arr._metadata_raw:
             return
 
         cve_ids = arr._metadata_raw["_cve_id"]
 
-        for i in range(len(arr)):
-            cve_id = str(cve_ids[i])
-            if cve_id and cve_id in epss_data:
-                try:
-                    score = float(epss_data[cve_id])
-                    if 0.0 <= score <= 1.0:
-                        arr._metadata_raw["epss"][i] = score
-                        arr.get(i).epss = score
-                    else:
-                        warnings.warn(f"Invalid EPSS score for {cve_id}: {score}", stacklevel=2)
-                except (ValueError, TypeError):
-                    warnings.warn(
-                        f"Invalid EPSS score for {cve_id}: {epss_data[cve_id]}", stacklevel=2
-                    )
+        # Process each vulnerability
+        if arr._vulnerabilities is not None and len(arr._vulnerabilities) > 0:
+            for i in range(len(arr)):
+                cve_id = str(cve_ids[i])
+                if not cve_id or cve_id not in epss_data:
+                    continue
+
+                vuln = arr.get(i)
+                epss_row = epss_data[cve_id]
+
+                # Extract score
+                if "score" in epss_row:
+                    try:
+                        score = float(epss_row["score"])
+                        if 0.0 <= score <= 1.0:
+                            arr._metadata_raw["epss"][i] = score
+                            vuln.epss = score
+                        else:
+                            warnings.warn(f"Invalid EPSS score for {cve_id}: {score}", stacklevel=2)
+                    except (ValueError, TypeError):
+                        warnings.warn(
+                            f"Invalid EPSS score for {cve_id}: {epss_row['score']}", stacklevel=2
+                        )
+
+                # Store metadata
+                if import_metadata:
+                    metadata_dict = dict(epss_row)
+
+                    # Apply include/exclude filters
+                    if include is not None:
+                        metadata_dict = {k: v for k, v in metadata_dict.items() if k in include}
+                    if exclude is not None:
+                        metadata_dict = {k: v for k, v in metadata_dict.items() if k not in exclude}
+
+                    if "epss" not in vuln.metadata:
+                        vuln.metadata["epss"] = {}
+                    vuln.metadata["epss"].update(metadata_dict)
+        else:
+            # TODO: Handle expunged _vulnerabilities
+            pass
 
     @staticmethod
     def import_kev(
@@ -393,8 +459,15 @@ class CVDIO:
     # ==================== FILE-BASED IMPORT ====================
 
     @staticmethod
-    def import_epss_file(arr: "CVDArray", filepath: str) -> None:
-        """Import EPSS scores from CSV file.
+    def import_epss_file(
+        arr: "CVDArray",
+        filepath: str,
+        import_metadata: bool = False,
+        include: Optional[list[str]] = None,
+        exclude: Optional[list[str]] = None,
+    ) -> None:
+        """
+        Import EPSS scores from CSV file (convenience wrapper).
 
         Expected CSV format:
             cve,epss,percentile
@@ -403,18 +476,11 @@ class CVDIO:
         Args:
             arr: CVDArray instance to update
             filepath: Path to EPSS CSV file
+            import_metadata: Store full EPSS data in vuln.metadata['epss'] (default False)
+            include: Only store these fields (if import_metadata=True)
+            exclude: Skip these fields (if import_metadata=True)
         """
-        import csv
-
-        epss_data = {}
-        with open(filepath) as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                cve_id = row["cve"]
-                epss_score = float(row["epss"])
-                epss_data[cve_id] = epss_score
-
-        CVDIO.import_epss(arr, epss_data)
+        CVDIO.import_epss(arr, filepath, import_metadata=import_metadata, include=include, exclude=exclude)
 
     @staticmethod
     def import_kev_file(

@@ -1075,3 +1075,43 @@ class TestKEVEventApplication:
         assert not vuln.has_event_occurred(CVDEvent.A)
         # But should still be marked as KEV
         assert vuln.is_kev
+
+    def test_import_epss_stores_metadata(self):
+        """EPSS import stores full metadata when import_metadata=True."""
+        arr = CVDArray([CVDVulnerability("CVE-2023-0001")])
+
+        epss_data = {"CVE-2023-0001": {"score": 0.85432, "percentile": 0.95123}}
+
+        arr.import_epss(epss_data, import_metadata=True)
+
+        vuln = arr.get(0)
+        assert "epss" in vuln.metadata
+        assert vuln.metadata["epss"]["score"] == 0.85432
+        assert vuln.metadata["epss"]["percentile"] == 0.95123
+
+    def test_import_epss_without_metadata(self):
+        """EPSS import stores score in enrichment when import_metadata=False."""
+        arr = CVDArray([CVDVulnerability("CVE-2023-0002")])
+
+        epss_data = {"CVE-2023-0002": {"score": 0.75, "percentile": 0.85}}
+
+        arr.import_epss(epss_data, import_metadata=False)
+
+        vuln = arr.get(0)
+        # Score should be in enrichment
+        assert vuln.epss == 0.75
+        # But not in metadata
+        assert "epss" not in vuln.metadata
+
+    def test_import_epss_filtering(self):
+        """EPSS import with include/exclude filters."""
+        arr = CVDArray([CVDVulnerability("CVE-2023-0003")])
+
+        epss_data = {"CVE-2023-0003": {"score": 0.85432, "percentile": 0.95123}}
+
+        # Include only score
+        arr.import_epss(epss_data, import_metadata=True, include=["score"])
+
+        vuln = arr.get(0)
+        assert "score" in vuln.metadata["epss"]
+        assert "percentile" not in vuln.metadata["epss"]
