@@ -161,9 +161,9 @@ class TestEnrichment:
                 CVDVulnerability("CVE-2024-002"),
             ]
         )
-        kev_cves = {"CVE-2024-001"}
+        kev_data = {"CVE-2024-001": {"dateAdded": "2021-11-03"}}
 
-        CVDIO.import_kev(arr, kev_cves)
+        CVDIO.import_kev(arr, kev_data, apply_event=False)
 
         assert arr[0].is_kev == True  # noqa: E712
         assert arr[1].is_kev == False  # noqa: E712
@@ -972,3 +972,106 @@ class TestMetadataPluck:
         assert len(high_epss) == 2
         assert high_epss.vuln_ids[0] == arr.vuln_ids[0]  # 0.95
         assert high_epss.vuln_ids[1] == arr.vuln_ids[2]  # 0.88
+
+
+class TestKEVEventApplication:
+    """Tests for KEV import with event A application."""
+
+    def test_import_kev_applies_event_a(self):
+        """KEV import applies event A with dateAdded timestamp."""
+        # Create array with CVEs
+        vulns = [
+            CVDVulnerability("CVE-2021-27104"),
+            CVDVulnerability("CVE-2021-27102"),
+        ]
+        arr = CVDArray(vulns)
+
+        # Import KEV with event application
+        kev_data = {
+            "CVE-2021-27104": {
+                "dateAdded": "2021-11-03",
+                "vendorProject": "Accellion",
+                "product": "FTA",
+            }
+        }
+
+        arr.import_kev(kev_data, apply_event=True)
+
+        # Check event A was applied
+        vuln = arr.get(0)
+        assert vuln.has_event_occurred(CVDEvent.A)
+        assert vuln.events[CVDEvent.A] == np.datetime64("2021-11-03")
+
+        # Second vuln should not have event A
+        assert not arr.get(1).has_event_occurred(CVDEvent.A)
+
+    def test_import_kev_without_event_application(self):
+        """KEV import with apply_event=False only sets is_kev flag."""
+        arr = CVDArray([CVDVulnerability("CVE-2021-27104")])
+
+        kev_data = {"CVE-2021-27104": {"dateAdded": "2021-11-03"}}
+
+        arr.import_kev(kev_data, apply_event=False)
+
+        vuln = arr.get(0)
+        # Should not have event A
+        assert not vuln.has_event_occurred(CVDEvent.A)
+        # But should be marked as KEV
+        assert vuln.is_kev
+
+    def test_import_kev_with_metadata(self):
+        """KEV import can store full metadata."""
+        arr = CVDArray([CVDVulnerability("CVE-2021-27104")])
+
+        kev_data = {
+            "CVE-2021-27104": {
+                "dateAdded": "2021-11-03",
+                "vendorProject": "Accellion",
+                "product": "FTA",
+            }
+        }
+
+        arr.import_kev(kev_data, apply_event=True, import_metadata=True)
+
+        vuln = arr.get(0)
+        assert "kev" in vuln.metadata
+        assert vuln.metadata["kev"]["dateAdded"] == "2021-11-03"
+        assert vuln.metadata["kev"]["vendorProject"] == "Accellion"
+        assert vuln.metadata["kev"]["product"] == "FTA"
+
+    def test_import_kev_metadata_filtering(self):
+        """KEV import with include/exclude filters."""
+        arr = CVDArray([CVDVulnerability("CVE-2021-27104")])
+
+        kev_data = {
+            "CVE-2021-27104": {
+                "dateAdded": "2021-11-03",
+                "vendorProject": "Accellion",
+                "product": "FTA",
+            }
+        }
+
+        # Include only specific fields
+        arr.import_kev(
+            kev_data, apply_event=True, import_metadata=True, include=["dateAdded", "vendorProject"]
+        )
+
+        vuln = arr.get(0)
+        assert "dateAdded" in vuln.metadata["kev"]
+        assert "vendorProject" in vuln.metadata["kev"]
+        assert "product" not in vuln.metadata["kev"]
+
+    def test_import_kev_missing_date(self):
+        """KEV import handles missing dateAdded gracefully."""
+        arr = CVDArray([CVDVulnerability("CVE-2021-27104")])
+
+        # KEV data without dateAdded
+        kev_data = {"CVE-2021-27104": {"vendorProject": "Accellion"}}
+
+        arr.import_kev(kev_data, apply_event=True)
+
+        vuln = arr.get(0)
+        # Should not have event A since dateAdded is missing
+        assert not vuln.has_event_occurred(CVDEvent.A)
+        # But should still be marked as KEV
+        assert vuln.is_kev

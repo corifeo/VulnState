@@ -1136,22 +1136,31 @@ class CVDArray:
 
         CVDIO.import_epss(self, epss_data)
 
-    def import_kev(self, kev_cves: set[str]) -> None:
+    def import_kev(
+        self,
+        source: Union[str, dict[str, dict[str, Any]]],
+        apply_event: bool = True,
+        import_metadata: bool = False,
+        include: Optional[list[str]] = None,
+        exclude: Optional[list[str]] = None,
+    ) -> None:
         """
-        Import CISA Known Exploited Vulnerabilities (KEV) catalog flags.
-
-        Delegates to CVDIO for implementation.
+        Import KEV catalog data.
 
         Args:
-            kev_cves: Set of CVE IDs in the CISA KEV catalog
+            source: Filepath to KEV CSV or dict mapping CVE IDs to KEV data
+            apply_event: Apply event A with dateAdded timestamp (default True)
+            import_metadata: Store full KEV data in metadata['kev'] (default False)
+            include: Only store these fields (if import_metadata=True)
+            exclude: Skip these fields (if import_metadata=True)
 
         Example:
-            >>> kev_list = {'CVE-2024-001', 'CVE-2024-003', ...}
-            >>> arr.import_kev(kev_list)
+            >>> arr.import_kev("kev.csv")
+            >>> arr.import_kev("kev.csv", import_metadata=True)
         """
         from .io import CVDIO
 
-        CVDIO.import_kev(self, kev_cves)
+        CVDIO.import_kev(self, source, apply_event, import_metadata, include, exclude)
 
     # ==================== FACTORY METHODS ====================
 
@@ -1284,7 +1293,14 @@ class CVDArray:
 
         CVDIO.import_epss_file(self, filepath)
 
-    def import_kev_file(self, filepath: str) -> None:
+    def import_kev_file(
+        self,
+        filepath: str,
+        apply_event: bool = True,
+        import_metadata: bool = False,
+        include: Optional[list[str]] = None,
+        exclude: Optional[list[str]] = None,
+    ) -> None:
         """
         Import KEV catalog from CSV file (convenience wrapper).
 
@@ -1292,13 +1308,17 @@ class CVDArray:
 
         Args:
             filepath: Path to KEV CSV file
+            apply_event: Apply event A with dateAdded timestamp (default True)
+            import_metadata: Store full KEV data in metadata['kev'] (default False)
+            include: Only store these fields (if import_metadata=True)
+            exclude: Skip these fields (if import_metadata=True)
 
         Example:
             >>> arr.import_kev_file('data/known_exploited_vulnerabilities.csv')
         """
         from .io import CVDIO
 
-        CVDIO.import_kev_file(self, filepath)
+        CVDIO.import_kev_file(self, filepath, apply_event, import_metadata, include, exclude)
 
     def import_nvd_file(self, filepath: str) -> None:
         """

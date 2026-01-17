@@ -18,7 +18,7 @@ Used by: array.py (convenience wrappers)
 import json
 import warnings
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 from .constants import CVDEvent
 
@@ -264,28 +264,90 @@ class CVDIO:
                     )
 
     @staticmethod
-    def import_kev(arr: "CVDArray", kev_cves: set[str]) -> None:
-        """Import KEV flags into array.
+    def import_kev(
+        arr: "CVDArray",
+        source: Union[str, dict[str, dict[str, Any]]],
+        apply_event: bool = True,
+        import_metadata: bool = False,
+        include: Optional[list[str]] = None,
+        exclude: Optional[list[str]] = None,
+    ) -> None:
+        """
+        Import KEV catalog data.
 
         Args:
             arr: CVDArray instance to update
-            kev_cves: Set of CVE IDs in the CISA KEV catalog
+            source: Filepath to KEV CSV or dict mapping CVE IDs to KEV data
+            apply_event: Apply event A with dateAdded timestamp (default True)
+            import_metadata: Store full KEV data in vuln.metadata['kev'] (default False)
+            include: Only store these fields (if import_metadata=True)
+            exclude: Skip these fields (if import_metadata=True)
         """
+        import csv
+
         import numpy as np
 
-        if "is_kev" not in arr._metadata_raw:
-            arr._metadata_raw["is_kev"] = np.full(len(arr), False, dtype=bool)
+        # Parse source
+        if isinstance(source, str):
+            # Read from CSV file
+            kev_data = {}
+            with open(source) as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    cve_id = row["cveID"]
+                    kev_data[cve_id] = dict(row)
+        else:
+            kev_data = source
 
+        # Get CVE IDs from array
         if "_cve_id" not in arr._metadata_raw:
             return
 
         cve_ids = arr._metadata_raw["_cve_id"]
 
-        for i in range(len(arr)):
-            cve_id = str(cve_ids[i])
-            if cve_id and cve_id in kev_cves:
+        # Initialize is_kev metadata if needed
+        if "is_kev" not in arr._metadata_raw:
+            arr._metadata_raw["is_kev"] = np.full(len(arr), False, dtype=bool)
+
+        # Process each vulnerability
+        if arr._vulnerabilities is not None and len(arr._vulnerabilities) > 0:
+            for i in range(len(arr)):
+                cve_id = str(cve_ids[i])
+                if not cve_id or cve_id not in kev_data:
+                    continue
+
+                vuln = arr.get(i)
+                kev_row = kev_data[cve_id]
+
+                # Set is_kev flag
                 arr._metadata_raw["is_kev"][i] = True
-                arr.get(i).is_kev = True
+                vuln.is_kev = True
+
+                # Apply event A
+                if apply_event and "dateAdded" in kev_row:
+                    date_added = np.datetime64(kev_row["dateAdded"])
+                    try:
+                        vuln.apply_event(CVDEvent.A, date_added)
+                    except ValueError:
+                        # Event constraints violated, skip
+                        pass
+
+                # Store metadata
+                if import_metadata:
+                    metadata_dict = dict(kev_row)
+
+                    # Apply include/exclude filters
+                    if include is not None:
+                        metadata_dict = {k: v for k, v in metadata_dict.items() if k in include}
+                    if exclude is not None:
+                        metadata_dict = {k: v for k, v in metadata_dict.items() if k not in exclude}
+
+                    if "kev" not in vuln.metadata:
+                        vuln.metadata["kev"] = {}
+                    vuln.metadata["kev"].update(metadata_dict)
+        else:
+            # TODO: Handle expunged _vulnerabilities
+            pass
 
     @staticmethod
     def import_nvdcve(arr: "CVDArray", nvd_data: dict[str, dict[str, Any]]) -> None:
@@ -355,28 +417,28 @@ class CVDIO:
         CVDIO.import_epss(arr, epss_data)
 
     @staticmethod
-    def import_kev_file(arr: "CVDArray", filepath: str) -> None:
+    def import_kev_file(
+        arr: "CVDArray",
+        filepath: str,
+        apply_event: bool = True,
+        import_metadata: bool = False,
+        include: Optional[list[str]] = None,
+        exclude: Optional[list[str]] = None,
+    ) -> None:
         """Import KEV catalog from CSV file.
 
         Expected CSV format (CISA KEV catalog):
             cveID,vendorProject,product,vulnerabilityName,dateAdded,...
 
-        Only the cveID column is used.
-
         Args:
             arr: CVDArray instance to update
             filepath: Path to KEV CSV file
+            apply_event: Apply event A with dateAdded timestamp (default True)
+            import_metadata: Store full KEV data in metadata['kev'] (default False)
+            include: Only store these fields (if import_metadata=True)
+            exclude: Skip these fields (if import_metadata=True)
         """
-        import csv
-
-        kev_cves: set[str] = set()
-        with open(filepath) as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                cve_id = row["cveID"]
-                kev_cves.add(cve_id)
-
-        CVDIO.import_kev(arr, kev_cves)
+        CVDIO.import_kev(arr, filepath, apply_event, import_metadata, include, exclude)
 
     @staticmethod
     def import_nvd_file(arr: "CVDArray", filepath: str) -> None:
