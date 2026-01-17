@@ -98,6 +98,41 @@ class TestArrayIO:
         assert len(arr) == 2
         assert arr[0].cve_id == "CVE-2024-A"
 
+    def test_to_dataframe(self):
+        """Convert array to pandas DataFrame."""
+        import pandas as pd
+
+        arr = CVDArray(
+            [
+                CVDVulnerability("CVE-2024-001", cvss_score=9.8),
+                CVDVulnerability("CVE-2024-002", cvss_score=7.5),
+            ]
+        )
+        arr[0].apply_event(CVDEvent.V)
+        arr[1].apply_event(CVDEvent.V)
+
+        df = arr.to_dataframe()
+
+        assert isinstance(df, pd.DataFrame)
+        assert len(df) == 2
+        assert "cve_id" in df.columns
+        assert "cvss_score" in df.columns
+        assert df.iloc[0]["cve_id"] == "CVE-2024-001"
+        assert df.iloc[0]["cvss_score"] == 9.8
+
+    def test_to_dataframe_with_computed(self):
+        """Convert array to DataFrame with computed properties."""
+        import pandas as pd
+
+        arr = CVDArray([CVDVulnerability("CVE-2024-001")])
+        arr[0].apply_event(CVDEvent.V)
+
+        df_basic = arr.to_dataframe(include_computed=False)
+        df_computed = arr.to_dataframe(include_computed=True)
+
+        assert len(df_computed.columns) > len(df_basic.columns)
+        assert "state_label" in df_computed.columns
+
 
 class TestEnrichment:
     """Tests for enrichment data import."""
@@ -842,3 +877,86 @@ class TestFileImportErrorHandling:
 
         with pytest.raises(json.JSONDecodeError):
             arr.import_nvd_file(str(malformed))
+
+
+class TestMetadataPluck:
+    """Tests for metadata extraction with pluck()."""
+
+    def test_pluck_metadata(self):
+        """Extract nested metadata values as numpy array."""
+        import numpy as np
+
+        # Create array with metadata
+        arr = CVDArray.zeros(3)
+        arr.get(0).metadata = {"kev": {"dateAdded": "2021-11-03", "vendor": "Adobe"}}
+        arr.get(1).metadata = {"kev": {"dateAdded": "2022-01-15", "vendor": "Microsoft"}}
+        arr.get(2).metadata = {}  # No KEV data
+
+        # Extract KEV dates
+        dates = arr.pluck("kev.dateAdded")
+        assert dates[0] == "2021-11-03"
+        assert dates[1] == "2022-01-15"
+        assert dates[2] is None
+
+        # Extract vendors
+        vendors = arr.pluck("kev.vendor")
+        assert vendors[0] == "Adobe"
+        assert vendors[1] == "Microsoft"
+        assert vendors[2] is None
+
+    def test_pluck_single_level(self):
+        """Extract top-level metadata values."""
+        arr = CVDArray.zeros(2)
+        arr.get(0).metadata = {"vendor": "Adobe", "severity": "high"}
+        arr.get(1).metadata = {"vendor": "Microsoft"}
+
+        vendors = arr.pluck("vendor")
+        assert vendors[0] == "Adobe"
+        assert vendors[1] == "Microsoft"
+
+        # Missing field
+        severity = arr.pluck("severity")
+        assert severity[0] == "high"
+        assert severity[1] is None
+
+    def test_pluck_deeply_nested(self):
+        """Extract deeply nested metadata values."""
+        arr = CVDArray.zeros(2)
+        arr.get(0).metadata = {"a": {"b": {"c": {"d": "value1"}}}}
+        arr.get(1).metadata = {"a": {"b": {"c": {"d": "value2"}}}}
+
+        values = arr.pluck("a.b.c.d")
+        assert values[0] == "value1"
+        assert values[1] == "value2"
+
+    def test_pluck_partial_path(self):
+        """Extract values when path exists partially."""
+        arr = CVDArray.zeros(2)
+        arr.get(0).metadata = {"kev": {"dateAdded": "2021-11-03"}}
+        arr.get(1).metadata = {"kev": {}}  # kev exists but no dateAdded
+
+        dates = arr.pluck("kev.dateAdded")
+        assert dates[0] == "2021-11-03"
+        assert dates[1] is None
+
+    def test_pluck_empty_array(self):
+        """Extract from empty array."""
+        import numpy as np
+
+        arr = CVDArray.zeros(0)
+        values = arr.pluck("kev.dateAdded")
+
+        assert isinstance(values, np.ndarray)
+        assert len(values) == 0
+
+    def test_pluck_numeric_values(self):
+        """Extract numeric metadata values."""
+        arr = CVDArray.zeros(3)
+        arr.get(0).metadata = {"epss": {"score": 0.85}}
+        arr.get(1).metadata = {"epss": {"score": 0.42}}
+        arr.get(2).metadata = {}
+
+        scores = arr.pluck("epss.score")
+        assert scores[0] == 0.85
+        assert scores[1] == 0.42
+        assert scores[2] is None

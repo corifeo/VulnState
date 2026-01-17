@@ -26,6 +26,8 @@ from typing import TYPE_CHECKING, Any, Optional, Union
 import numpy as np
 
 if TYPE_CHECKING:
+    import pandas as pd
+
     from .models import AnalysisResult
 
 from .constants import (
@@ -495,6 +497,42 @@ class CVDArray:
             else:
                 result[field_name] = values
         return result
+
+    def pluck(self, path: str) -> "np.ndarray":
+        """
+        Extract nested metadata values as numpy array using dot notation.
+
+        Args:
+            path: Dot-separated path to metadata field (e.g., 'kev.dateAdded')
+
+        Returns:
+            Numpy array with values (None for missing data)
+
+        Example:
+            >>> kev_dates = arr.pluck('kev.dateAdded')
+            >>> high_epss = arr[arr.pluck('epss.score') > 0.8]
+        """
+        import numpy as np
+
+        result = []
+        keys = path.split(".")
+
+        if self._vulnerabilities is not None:
+            # Fast path: extract from objects
+            for vuln in self._vulnerabilities:
+                value = vuln.metadata
+                for key in keys:
+                    if isinstance(value, dict) and key in value:
+                        value = value[key]
+                    else:
+                        value = None
+                        break
+                result.append(value)
+        else:
+            # Expunged: return None array
+            result = [None] * len(self)
+
+        return np.array(result, dtype=object)
 
     def __getitem__(
         self, idx: Union[int, slice, np.ndarray]
@@ -987,6 +1025,28 @@ class CVDArray:
             List of vulnerability dictionaries
         """
         return [vuln.to_dict(include_computed=include_computed) for vuln in self]
+
+    def to_dataframe(self, include_computed: bool = False) -> "pd.DataFrame":
+        """
+        Convert array to pandas DataFrame.
+
+        Args:
+            include_computed: Include computed properties (analysis results) as columns
+
+        Returns:
+            pandas DataFrame with one row per vulnerability
+
+        Example:
+            >>> df = arr.to_dataframe()
+            >>> df.head()
+            >>> df.groupby('severity').count()
+
+        FIX: THIS SHOULD BE IN io.py
+        """
+        import pandas as pd
+
+        dicts = self.to_dict_batch(include_computed=include_computed)
+        return pd.DataFrame(dicts)
 
     def to_json_batch(self, filepath: str, include_computed: bool = False) -> None:
         """
