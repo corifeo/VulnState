@@ -1115,3 +1115,44 @@ class TestKEVEventApplication:
         vuln = arr.get(0)
         assert "score" in vuln.metadata["epss"]
         assert "percentile" not in vuln.metadata["epss"]
+
+
+class TestGenericCSVImport:
+    """Tests for generic CSV import method."""
+
+    def test_import_csv_applies_event(self):
+        """Generic CSV import applies specified event."""
+        import csv
+        import tempfile
+
+        # Create test CSV
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=["cve_id", "patch_date", "advisory_id"])
+            writer.writeheader()
+            writer.writerow(
+                {"cve_id": "CVE-2024-0001", "patch_date": "2024-02-01", "advisory_id": "VENDOR-2024-001"}
+            )
+            csv_path = f.name
+
+        try:
+            arr = CVDArray.zeros(1)
+            arr.get(0).identity.cve_id = "CVE-2024-0001"
+            # Update the metadata array to reflect the CVE ID
+            arr._metadata_raw["_cve_id"][0] = "CVE-2024-0001"
+            # Apply event V first to satisfy V→F→D constraint
+            arr.get(0).apply_event(CVDEvent.V, np.datetime64("2024-01-01"))
+            arr.sync()
+
+            arr.import_csv(
+                source=csv_path,
+                cve_column="cve_id",
+                event=CVDEvent.F,
+                timestamp_column="patch_date",
+                apply_event=True,
+            )
+
+            vuln = arr.get(0)
+            assert vuln.has_event_occurred(CVDEvent.F)
+            assert vuln.events[CVDEvent.F] == np.datetime64("2024-02-01")
+        finally:
+            os.unlink(csv_path)

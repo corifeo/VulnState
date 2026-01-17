@@ -1174,6 +1174,83 @@ class CVDArray:
 
         CVDIO.import_kev(self, source, apply_event, import_metadata, include, exclude)
 
+    def import_csv(
+        self,
+        source: Union[str, list[dict[str, Any]]],
+        cve_column: str,
+        event: CVDEvent,
+        timestamp_column: str,
+        apply_event: bool = True,
+        metadata_namespace: Optional[str] = None,
+        import_metadata: bool = False,
+        include: Optional[list[str]] = None,
+        exclude: Optional[list[str]] = None,
+    ) -> None:
+        """
+        Generic CSV import that applies any CVD event with timestamps.
+
+        This method enables importing vendor patch advisories (event F),
+        threat intel (event A), or any custom timeline data. It can match
+        CVEs and apply the specified event with a timestamp, optionally
+        storing the full row data in metadata.
+
+        Delegates to CVDIO for implementation.
+
+        Args:
+            source: Filepath to CSV or list of row dicts
+            cve_column: Column name containing CVE IDs
+            event: CVD event to apply (V, F, D, P, X, or A)
+            timestamp_column: Column name containing event timestamps
+            apply_event: Apply event with timestamp (default True)
+            metadata_namespace: Namespace for storing row metadata (default: None)
+            import_metadata: Store full row in vuln.metadata[namespace] (default False)
+            include: Only store these fields (if import_metadata=True)
+            exclude: Skip these fields (if import_metadata=True)
+
+        Example:
+            # Import vendor patch dates (event F)
+            >>> arr.import_csv(
+            ...     source='vendor_patches.csv',
+            ...     cve_column='cve_id',
+            ...     event=CVDEvent.F,
+            ...     timestamp_column='patch_date',
+            ...     apply_event=True
+            ... )
+
+            # Import threat intel with metadata
+            >>> arr.import_csv(
+            ...     source='threat_intel.csv',
+            ...     cve_column='cve',
+            ...     event=CVDEvent.A,
+            ...     timestamp_column='attack_date',
+            ...     apply_event=True,
+            ...     import_metadata=True,
+            ...     metadata_namespace='threat_intel'
+            ... )
+
+            # Import disclosure dates (event P)
+            >>> arr.import_csv(
+            ...     source='disclosures.csv',
+            ...     cve_column='vuln_id',
+            ...     event=CVDEvent.P,
+            ...     timestamp_column='disclosure_date'
+            ... )
+        """
+        from .io import CVDIO
+
+        CVDIO.import_csv(
+            self,
+            source,
+            cve_column,
+            event,
+            timestamp_column,
+            apply_event,
+            metadata_namespace,
+            import_metadata,
+            include,
+            exclude,
+        )
+
     # ==================== FACTORY METHODS ====================
 
     @classmethod

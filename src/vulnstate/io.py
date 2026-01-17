@@ -7,6 +7,7 @@ Provides:
   - to_json/from_json: JSON string conversion
   - save_json/load_json: JSON file I/O
   - import_epss/import_kev/import_nvdcve: Dict-based enrichment import
+  - import_csv: Generic CSV import for any CVD event with timestamps
   - import_epss_file/import_kev_file/import_nvd_file: File-based import
   - from_nvd: Create array from NVD JSON items
 
@@ -457,6 +458,119 @@ class CVDIO:
                     vuln.cve_vector = nvd_info["cve_vector"]
 
     # ==================== FILE-BASED IMPORT ====================
+
+    @staticmethod
+    def import_csv(
+        arr: "CVDArray",
+        source: Union[str, list[dict[str, Any]]],
+        cve_column: str,
+        event: CVDEvent,
+        timestamp_column: str,
+        apply_event: bool = True,
+        metadata_namespace: Optional[str] = None,
+        import_metadata: bool = False,
+        include: Optional[list[str]] = None,
+        exclude: Optional[list[str]] = None,
+    ) -> None:
+        """
+        Generic CSV import that applies any CVD event with timestamps.
+
+        This method enables importing vendor patch advisories (event F),
+        threat intel (event A), or any custom timeline data. It can match
+        CVEs and apply the specified event with a timestamp, optionally
+        storing the full row data in metadata.
+
+        Args:
+            arr: CVDArray instance to update
+            source: Filepath to CSV or list of row dicts
+            cve_column: Column name containing CVE IDs
+            event: CVD event to apply (V, F, D, P, X, or A)
+            timestamp_column: Column name containing event timestamps
+            apply_event: Apply event with timestamp (default True)
+            metadata_namespace: Namespace for storing row metadata (default: None)
+            import_metadata: Store full row in vuln.metadata[namespace] (default False)
+            include: Only store these fields (if import_metadata=True)
+            exclude: Skip these fields (if import_metadata=True)
+
+        Example:
+            # Import vendor patch dates (event F)
+            >>> arr.import_csv(
+            ...     source='vendor_patches.csv',
+            ...     cve_column='cve_id',
+            ...     event=CVDEvent.F,
+            ...     timestamp_column='patch_date',
+            ...     apply_event=True
+            ... )
+
+            # Import threat intel with metadata
+            >>> arr.import_csv(
+            ...     source='threat_intel.csv',
+            ...     cve_column='cve',
+            ...     event=CVDEvent.A,
+            ...     timestamp_column='attack_date',
+            ...     apply_event=True,
+            ...     import_metadata=True,
+            ...     metadata_namespace='threat_intel'
+            ... )
+        """
+        import csv
+
+        import numpy as np
+
+        # Parse source
+        if isinstance(source, str):
+            # Read from CSV file
+            csv_data: dict[str, dict[str, Any]] = {}
+            with open(source) as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    cve_id = row[cve_column]
+                    csv_data[cve_id] = dict(row)
+        else:
+            # List of dicts
+            csv_data = {row[cve_column]: row for row in source}
+
+        # Get CVE IDs from array
+        if "_cve_id" not in arr._metadata_raw:
+            return
+
+        cve_ids = arr._metadata_raw["_cve_id"]
+
+        # Process each vulnerability
+        if arr._vulnerabilities is not None and len(arr._vulnerabilities) > 0:
+            for i in range(len(arr)):
+                cve_id = str(cve_ids[i])
+                if not cve_id or cve_id not in csv_data:
+                    continue
+
+                vuln = arr.get(i)
+                csv_row = csv_data[cve_id]
+
+                # Apply event with timestamp
+                if apply_event and timestamp_column in csv_row:
+                    timestamp = np.datetime64(csv_row[timestamp_column])
+                    try:
+                        vuln.apply_event(event, timestamp)
+                    except ValueError:
+                        # Event constraints violated, skip
+                        pass
+
+                # Store metadata
+                if import_metadata and metadata_namespace:
+                    metadata_dict = dict(csv_row)
+
+                    # Apply include/exclude filters
+                    if include is not None:
+                        metadata_dict = {k: v for k, v in metadata_dict.items() if k in include}
+                    if exclude is not None:
+                        metadata_dict = {k: v for k, v in metadata_dict.items() if k not in exclude}
+
+                    if metadata_namespace not in vuln.metadata:
+                        vuln.metadata[metadata_namespace] = {}
+                    vuln.metadata[metadata_namespace].update(metadata_dict)
+        else:
+            # TODO: Handle expunged _vulnerabilities
+            pass
 
     @staticmethod
     def import_epss_file(
