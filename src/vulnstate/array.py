@@ -24,6 +24,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional, Union
 
 import numpy as np
+import numpy.typing as npt
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -498,7 +499,7 @@ class CVDArray:
                 result[field_name] = values
         return result
 
-    def pluck(self, path: str) -> "np.ndarray":
+    def pluck(self, path: str) -> npt.NDArray[np.object_]:
         """
         Extract nested metadata values as numpy array using dot notation.
 
@@ -506,7 +507,8 @@ class CVDArray:
             path: Dot-separated path to metadata field (e.g., 'kev.dateAdded')
 
         Returns:
-            Numpy array with values (None for missing data)
+            Numpy array with values (None/NaN for missing data).
+            Numeric arrays convert None to np.nan for filtering compatibility.
 
         Example:
             >>> kev_dates = arr.pluck('kev.dateAdded')
@@ -514,10 +516,10 @@ class CVDArray:
         """
         import numpy as np
 
-        result = []
+        result: list[Any] = []
         keys = path.split(".")
 
-        if self._vulnerabilities is not None:
+        if self._vulnerabilities is not None and len(self._vulnerabilities) > 0:
             # Fast path: extract from objects
             for vuln in self._vulnerabilities:
                 value = vuln.metadata
@@ -529,8 +531,13 @@ class CVDArray:
                         break
                 result.append(value)
         else:
-            # Expunged: return None array
+            # Expunged or empty: return appropriate array
             result = [None] * len(self)
+
+        # Convert None to np.nan for numeric arrays to enable boolean filtering
+        if result and all(isinstance(v, (int, float)) or v is None for v in result):
+            numeric_result = [v if v is not None else np.nan for v in result]
+            return np.array(numeric_result, dtype=float)
 
         return np.array(result, dtype=object)
 

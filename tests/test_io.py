@@ -12,6 +12,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from vulnstate import CVDArray, CVDEvent, CVDVulnerability
@@ -122,8 +123,6 @@ class TestArrayIO:
 
     def test_to_dataframe_with_computed(self):
         """Convert array to DataFrame with computed properties."""
-        import pandas as pd
-
         arr = CVDArray([CVDVulnerability("CVE-2024-001")])
         arr[0].apply_event(CVDEvent.V)
 
@@ -884,8 +883,6 @@ class TestMetadataPluck:
 
     def test_pluck_metadata(self):
         """Extract nested metadata values as numpy array."""
-        import numpy as np
-
         # Create array with metadata
         arr = CVDArray.zeros(3)
         arr.get(0).metadata = {"kev": {"dateAdded": "2021-11-03", "vendor": "Adobe"}}
@@ -959,4 +956,19 @@ class TestMetadataPluck:
         scores = arr.pluck("epss.score")
         assert scores[0] == 0.85
         assert scores[1] == 0.42
-        assert scores[2] is None
+        # Numeric arrays convert None to np.nan for filtering compatibility
+        assert np.isnan(scores[2])
+
+    def test_pluck_numeric_filtering(self):
+        """Boolean filtering works with numeric values and NaN."""
+        arr = CVDArray.zeros(4)
+        arr.get(0).metadata = {"epss": {"score": 0.95}}
+        arr.get(1).metadata = {"epss": {"score": 0.42}}
+        arr.get(2).metadata = {"epss": {"score": 0.88}}
+        arr.get(3).metadata = {}  # Missing -> NaN
+
+        # Filter using comparison operators (NaN comparisons return False)
+        high_epss = arr[arr.pluck("epss.score") > 0.8]
+        assert len(high_epss) == 2
+        assert high_epss.vuln_ids[0] == arr.vuln_ids[0]  # 0.95
+        assert high_epss.vuln_ids[1] == arr.vuln_ids[2]  # 0.88
