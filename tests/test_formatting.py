@@ -76,6 +76,23 @@ class TestFormatDesiderata:
         assert isinstance(result, Table)
 
 
+class TestFormatDimensions:
+    """Tests for format_dimensions method."""
+
+    def test_format_dimensions_returns_table(self):
+        """format_dimensions returns a rich Table."""
+        vuln = CVDVulnerability("CVE-2024-001")
+        vuln.apply_event(CVDEvent.V)
+        result = CVDFormatter.format_dimensions(vuln)
+        assert isinstance(result, Table)
+
+    def test_format_dimensions_initial_state(self):
+        """format_dimensions works with initial state."""
+        vuln = CVDVulnerability("CVE-2024-001")
+        result = CVDFormatter.format_dimensions(vuln)
+        assert isinstance(result, Table)
+
+
 class TestFormatStateLegend:
     """Tests for format_state_legend method."""
 
@@ -107,6 +124,14 @@ class TestPrintMethods:
         vuln = CVDVulnerability("CVE-2024-001")
         vuln.apply_event(CVDEvent.V)
         CVDFormatter.print_desiderata(vuln)
+        captured = capsys.readouterr()
+        assert len(captured.out) > 0
+
+    def test_print_dimensions_no_error(self, capsys):
+        """print_dimensions executes without error."""
+        vuln = CVDVulnerability("CVE-2024-001")
+        vuln.apply_event(CVDEvent.V)
+        CVDFormatter.print_dimensions(vuln)
         captured = capsys.readouterr()
         assert len(captured.out) > 0
 

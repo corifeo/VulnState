@@ -57,9 +57,9 @@ class CVDFormatter:
         lines.append(f"[bold blue]State:[/bold blue] {vuln.state}")
         lines.append(f"[bold blue]Description:[/bold blue] {vuln.state_description}")
 
-        # Cube (VFD portion of state) and history
-        cube_text = vuln.state[:3]  # First 3 chars are VFD (fix path)
-        lines.append(f"[bold blue]Cube:[/bold blue] {cube_text}")
+        # Fix Path (VFD portion of state) and history
+        fix_path_text = vuln.state[:3]  # First 3 chars are VFD (fix path)
+        lines.append(f"[bold blue]Fix Path:[/bold blue] {fix_path_text}")
         lines.append(f"[bold blue]History:[/bold blue] {vuln.history_string}")
 
         # Event timestamps
@@ -70,8 +70,10 @@ class CVDFormatter:
             known_events = [(e, t) for e, t in vuln.events.items() if t is not None]
             for event, ts in sorted(known_events, key=lambda x: x[1]):
                 ts_str = ts.strftime("%Y-%m-%d %H:%M:%S")
+                label = EVENT_LABELS[event]
                 lines.append(
-                    f"  [{CVDFormatter.COLOR_TIMESTAMP}]{EVENT_LABELS[event]}[/{CVDFormatter.COLOR_TIMESTAMP}]: {ts_str}"
+                    f"  [{CVDFormatter.COLOR_TIMESTAMP}]{label}"
+                    f"[/{CVDFormatter.COLOR_TIMESTAMP}]: {ts_str}"
                 )
 
         # Metadata
@@ -125,8 +127,10 @@ class CVDFormatter:
             node.add(
                 f"[{CVDFormatter.COLOR_TIMESTAMP}]Time:[/{CVDFormatter.COLOR_TIMESTAMP}] {ts_str}"
             )
+            transition = f"{from_state} → {to_state}"
             node.add(
-                f"[{CVDFormatter.COLOR_INFO}]Transition:[/{CVDFormatter.COLOR_INFO}] {from_state} → {to_state}"
+                f"[{CVDFormatter.COLOR_INFO}]Transition:"
+                f"[/{CVDFormatter.COLOR_INFO}] {transition}"
             )
             node.add(f"[{CVDFormatter.COLOR_MUTED}]Actor:[/{CVDFormatter.COLOR_MUTED}] {actor}")
             if notes:
@@ -231,6 +235,50 @@ class CVDFormatter:
         return table
 
     @staticmethod
+    def format_dimensions(vuln: "CVDVulnerability") -> Table:
+        """
+        Format fix_path and threat_state as separate dimensions.
+
+        Args:
+            vuln: CVDVulnerability object
+
+        Returns:
+            rich.Table with dimension breakdown
+        """
+        table = Table(title="[bold cyan]Vulnerability Dimensions[/bold cyan]", box=box.ROUNDED)
+
+        table.add_column("Dimension", style=CVDFormatter.COLOR_INFO)
+        table.add_column("State", style=CVDFormatter.COLOR_SUCCESS)
+        table.add_column("Description", style=CVDFormatter.COLOR_MUTED)
+
+        # Fix Path (VFD)
+        fix_path = vuln.state[:3]
+        fix_path_color = CVDFormatter._get_fix_path_color(fix_path)
+        fix_path_desc = {
+            "vfd": "NO_AWARENESS - Vendor unaware",
+            "Vfd": "VENDOR_AWARE - No fix ready",
+            "VFd": "FIX_READY - Fix available",
+            "VFD": "REMEDIATED - Fix deployed",
+        }.get(fix_path, "Unknown")
+
+        table.add_row(
+            "Fix Path (VFD)", f"[{fix_path_color}]{fix_path}[/{fix_path_color}]", fix_path_desc
+        )
+
+        # Threat State (PXA)
+        threat_state = vuln.state[3:]
+        threat_state_desc = {
+            "pxa": "LATENT - No disclosure",
+            "Pxa": "DISCLOSED - Publicly known",
+            "PXa": "WEAPONIZED - Exploit exists",
+            "PXA": "ACTIVE_THREAT - Under attack",
+        }.get(threat_state, "Unknown")
+
+        table.add_row("Threat State (PXA)", threat_state, threat_state_desc)
+
+        return table
+
+    @staticmethod
     def format_state_legend() -> Panel:
         """
         Format legend explaining state abbreviations and meanings.
@@ -255,26 +303,30 @@ class CVDFormatter:
             lines.append(f"  {char}/{char.lower()}: {upper_desc} / {lower_desc}")
 
         lines.append("")
-        lines.append("[bold]Cube Stages:[/bold]")
-        lines.append("  vfd: Vendor Unaware, No Fix, Not Deployed")
-        lines.append("  Vfd: Vendor Aware, Fix Not Ready, Not Deployed")
-        lines.append("  VFd: Fix Ready, Not Deployed")
-        lines.append("  VFD: Fix Deployed (terminal)")
+        lines.append("[bold]Fix Path (VFD Dimension):[/bold]")
+        lines.append("  vfd (000): NO_AWARENESS - Vulnerability exists but vendor unaware")
+        lines.append("  Vfd (001): VENDOR_AWARE - Vendor knows but no fix ready")
+        lines.append("  VFd (011): FIX_READY - Fix available but not deployed")
+        lines.append("  VFD (111): REMEDIATED - Fix deployed")
+        lines.append("")
+        lines.append("[bold]Threat State (PXA Dimension):[/bold]")
+        lines.append("  pxa (000): LATENT - No public disclosure or exploitation")
+        lines.append("  Pxa (001): DISCLOSED - Publicly known but no exploit")
+        lines.append("  PXa (011): WEAPONIZED - Public exploit exists")
+        lines.append("  PXA (111): ACTIVE_THREAT - Under active attack")
 
         content = "\n".join(lines)
         return Panel(content, border_style="blue")
 
     @staticmethod
-    def _get_cube_color(cube: str) -> str:
-        """Get color based on cube progression."""
-        if cube == "VFD":
-            return "green"
-        elif cube == "VFd":
-            return "yellow"
-        elif cube == "Vfd":
-            return "blue"
-        else:  # vfd
-            return "red"
+    def _get_fix_path_color(fix_path: str) -> str:
+        """Get color based on fix path progression."""
+        fix_path_colors = {
+            "VFD": "green",  # REMEDIATED
+            "VFd": "yellow",  # FIX_READY
+            "Vfd": "blue",  # VENDOR_AWARE
+        }
+        return fix_path_colors.get(fix_path, "red")  # NO_AWARENESS or unknown
 
     @staticmethod
     def print_vulnerability(vuln: "CVDVulnerability", console: Optional[Console] = None) -> None:
@@ -317,6 +369,20 @@ class CVDFormatter:
             console = Console()
 
         console.print(CVDFormatter.format_desiderata(vuln))
+
+    @staticmethod
+    def print_dimensions(vuln: "CVDVulnerability", console: Optional[Console] = None) -> None:
+        """
+        Print formatted dimensions to console.
+
+        Args:
+            vuln: CVDVulnerability object
+            console: rich.Console instance (creates new one if None)
+        """
+        if console is None:
+            console = Console()
+
+        console.print(CVDFormatter.format_dimensions(vuln))
 
     @staticmethod
     def print_state_legend(console: Optional[Console] = None) -> None:
