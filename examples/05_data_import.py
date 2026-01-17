@@ -307,7 +307,9 @@ def section_4b_dimension_based_filtering():
     console.print(f"  [red]High risk[/red] (no fix + weaponized): {len(high_risk)}")
 
     # Medium risk: fix ready but public
-    med_risk = arr[(arr.fix_path == FixPath.FIX_READY) & (arr.threat_state >= ThreatState.DISCLOSED)]
+    med_risk = arr[
+        (arr.fix_path == FixPath.FIX_READY) & (arr.threat_state >= ThreatState.DISCLOSED)
+    ]
     console.print(f"  [yellow]Medium risk[/yellow] (fix ready + public): {len(med_risk)}")
 
     # Low risk: remediated

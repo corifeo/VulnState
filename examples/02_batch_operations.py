@@ -227,7 +227,9 @@ def section_3b_dimension_analysis():
     console.print(f"  High risk (no fix + weaponized): {len(high_risk):,}")
 
     # Medium-risk: public but fix ready
-    med_risk = arr[(arr.fix_path == FixPath.FIX_READY) & (arr.threat_state >= ThreatState.DISCLOSED)]
+    med_risk = arr[
+        (arr.fix_path == FixPath.FIX_READY) & (arr.threat_state >= ThreatState.DISCLOSED)
+    ]
     console.print(f"  Medium risk (fix ready + public): {len(med_risk):,}")
 
     # Low-risk: remediated

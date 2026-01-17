@@ -184,7 +184,9 @@ def section_1b_dimension_based_risk():
     high_risk = arr[
         (arr.fix_path == FixPath.FIX_READY) & (arr.threat_state >= ThreatState.WEAPONIZED)
     ]
-    watch_list = arr[(arr.fix_path < FixPath.REMEDIATED) & (arr.threat_state >= ThreatState.DISCLOSED)]
+    watch_list = arr[
+        (arr.fix_path < FixPath.REMEDIATED) & (arr.threat_state >= ThreatState.DISCLOSED)
+    ]
 
     console.print(f"  [red]Critical:[/red] No fix + weaponized/attacked: {len(critical_risk)}")
     console.print(f"  [yellow]High:[/yellow]     Fix ready + weaponized/attacked: {len(high_risk)}")
