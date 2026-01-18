@@ -1467,4 +1467,3 @@ class CVDArray:
             )
             vulns.append(vuln)
         return cls(vulns)
-

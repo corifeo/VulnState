@@ -234,9 +234,7 @@ def section_4_combined_enrichment():
 
     # Step 3: KEV
     console.print("[yellow]Step 3: Mark KEV entries...[/yellow]")
-    kev_data = {
-        f"CVE-2024-{i:05d}": {"dateAdded": "2024-01-20"} for i in range(0, 50, 7)
-    }
+    kev_data = {f"CVE-2024-{i:05d}": {"dateAdded": "2024-01-20"} for i in range(0, 50, 7)}
     arr.import_kev(kev_data)
     kev_count = sum(1 for i in range(len(arr)) if arr.get(i).is_kev)
     console.print(f"  Marked {kev_count} KEV entries")
@@ -298,9 +296,7 @@ def section_4b_dimension_based_filtering():
     arr = create_base_dataset(100)
     epss_data = {f"CVE-2024-{i:05d}": round(random.uniform(0.01, 0.8), 4) for i in range(100)}
     arr.import_epss(epss_data)
-    kev_data = {
-        f"CVE-2024-{i:05d}": {"dateAdded": "2024-01-15"} for i in range(0, 100, 10)
-    }
+    kev_data = {f"CVE-2024-{i:05d}": {"dateAdded": "2024-01-15"} for i in range(0, 100, 10)}
     arr.import_kev(kev_data)
 
     console.print("[bold]Dimension-Based Risk Segmentation:[/bold]")

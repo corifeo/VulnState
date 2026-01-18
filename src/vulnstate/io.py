@@ -17,6 +17,7 @@ Dependencies: vulnerability.py, array.py, models.py, constants.py, states.py
 Used by: array.py (convenience wrappers)
 """
 
+import contextlib
 import json
 import warnings
 from datetime import datetime
@@ -485,11 +486,9 @@ class CVDIO:
                 # Apply event A
                 if apply_event and "dateAdded" in kev_row:
                     date_added = np.datetime64(kev_row["dateAdded"])
-                    try:
+                    with contextlib.suppress(ValueError):
+                        # Event constraints violated, skip if raised
                         vuln.apply_event(CVDEvent.A, date_added)
-                    except ValueError:
-                        # Event constraints violated, skip
-                        pass
 
                 # Store metadata
                 if import_metadata:
@@ -641,11 +640,9 @@ class CVDIO:
                 # Apply event with timestamp
                 if apply_event and timestamp_column in csv_row:
                     timestamp = np.datetime64(csv_row[timestamp_column])
-                    try:
+                    with contextlib.suppress(ValueError):
+                        # Event constraints violated, skip if raised
                         vuln.apply_event(event, timestamp)
-                    except ValueError:
-                        # Event constraints violated, skip
-                        pass
 
                 # Store metadata
                 if import_metadata and metadata_namespace:
@@ -776,11 +773,9 @@ class CVDIO:
                     timestamp_value = get_nested(json_row, timestamp_field)
                     if timestamp_value:
                         timestamp = np.datetime64(timestamp_value)
-                        try:
+                        with contextlib.suppress(ValueError):
+                            # Event constraints violated, skip if raised
                             vuln.apply_event(event, timestamp)
-                        except ValueError:
-                            # Event constraints violated, skip
-                            pass
 
                 # Store metadata
                 if import_metadata and metadata_namespace:
