@@ -1343,7 +1343,7 @@ class CVDArray:
         """
         Import NVD data from JSON file (convenience wrapper).
 
-        Delegates to CVDIO.import_nvd_file().
+        Parses NVD Feed 1.1 format and delegates to CVDIO.import_nvdcve().
 
         Args:
             filepath: Path to NVD JSON file
@@ -1351,9 +1351,33 @@ class CVDArray:
         Example:
             >>> arr.import_nvd_file('data/nvdcve-1.1-2024.json')
         """
+        import json
+        from typing import Any
+
         from .io import CVDIO
 
-        CVDIO.import_nvd_file(self, filepath)
+        with open(filepath) as f:
+            nvd_feed = json.load(f)
+
+        nvd_data: dict[str, dict[str, Any]] = {}
+        for item in nvd_feed.get("CVE_Items", []):
+            cve_id = item["cve"]["CVE_data_meta"]["ID"]
+            nvd_info: dict[str, Any] = {}
+
+            impact = item.get("impact", {})
+            if "baseMetricV3" in impact:
+                cvss_v3 = impact["baseMetricV3"]["cvssV3"]
+                nvd_info["cvss_score"] = cvss_v3["baseScore"]
+                nvd_info["cve_vector"] = cvss_v3.get("vectorString", "")
+            elif "baseMetricV2" in impact:
+                cvss_v2 = impact["baseMetricV2"]["cvssV2"]
+                nvd_info["cvss_score"] = cvss_v2["baseScore"]
+                nvd_info["cve_vector"] = cvss_v2.get("vectorString", "")
+
+            if nvd_info:
+                nvd_data[cve_id] = nvd_info
+
+        CVDIO.import_nvdcve(self, nvd_data)
 
     # ==================== FACTORY METHODS ====================
 

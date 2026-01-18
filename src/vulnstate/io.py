@@ -288,9 +288,18 @@ class CVDIO:
 
         # Add analytics if requested
         if include_analytics:
-            # TODO: Add more analytics fields
-            # For now, just add basic computed properties
-            pass
+            # Add computed properties from CVDArray analytics
+            df["fix_path"] = arr.fix_path
+            df["threat_state"] = arr.threat_state
+            df["is_zero_day"] = arr.is_zero_day
+            df["is_fix_available"] = arr.is_fix_available
+            df["is_fix_deployed"] = arr.is_fix_deployed
+            df["has_public_exploit"] = arr.has_public_exploit
+            df["is_under_attack"] = arr.is_under_attack
+            df["premature_disclosure"] = arr.premature_disclosure
+            df["disclosure_window_days"] = arr.disclosure_window_days
+            df["fix_lag_days"] = arr.fix_lag_days
+            df["deployment_lag_days"] = arr.deployment_lag_days
 
         # Explode CVSS vectors if requested
         if explode_cvss:
@@ -793,89 +802,6 @@ class CVDIO:
         else:
             # TODO: Handle expunged _vulnerabilities
             pass
-
-    @staticmethod
-    def import_epss_file(
-        arr: "CVDArray",
-        filepath: str,
-        import_metadata: bool = False,
-        include: Optional[list[str]] = None,
-        exclude: Optional[list[str]] = None,
-    ) -> None:
-        """
-        Import EPSS scores from CSV file (convenience wrapper).
-
-        Expected CSV format:
-            cve,epss,percentile
-            CVE-2024-001,0.85432,0.95123
-
-        Args:
-            arr: CVDArray instance to update
-            filepath: Path to EPSS CSV file
-            import_metadata: Store full EPSS data in vuln.metadata['epss'] (default False)
-            include: Only store these fields (if import_metadata=True)
-            exclude: Skip these fields (if import_metadata=True)
-        """
-        CVDIO.import_epss(
-            arr, filepath, import_metadata=import_metadata, include=include, exclude=exclude
-        )
-
-    @staticmethod
-    def import_kev_file(
-        arr: "CVDArray",
-        filepath: str,
-        apply_event: bool = True,
-        import_metadata: bool = False,
-        include: Optional[list[str]] = None,
-        exclude: Optional[list[str]] = None,
-    ) -> None:
-        """Import KEV catalog from CSV file.
-
-        Expected CSV format (CISA KEV catalog):
-            cveID,vendorProject,product,vulnerabilityName,dateAdded,...
-
-        Args:
-            arr: CVDArray instance to update
-            filepath: Path to KEV CSV file
-            apply_event: Apply event A with dateAdded timestamp (default True)
-            import_metadata: Store full KEV data in metadata['kev'] (default False)
-            include: Only store these fields (if import_metadata=True)
-            exclude: Skip these fields (if import_metadata=True)
-        """
-        CVDIO.import_kev(arr, filepath, apply_event, import_metadata, include, exclude)
-
-    @staticmethod
-    def import_nvd_file(arr: "CVDArray", filepath: str) -> None:
-        """Import NVD data from JSON file (NVD Feed 1.1 format).
-
-        Falls back to CVSS v2 if v3 is not available.
-
-        Args:
-            arr: CVDArray instance to update
-            filepath: Path to NVD JSON file
-        """
-        with open(filepath) as f:
-            nvd_feed = json.load(f)
-
-        nvd_data: dict[str, dict[str, Any]] = {}
-        for item in nvd_feed.get("CVE_Items", []):
-            cve_id = item["cve"]["CVE_data_meta"]["ID"]
-            nvd_info: dict[str, Any] = {}
-
-            impact = item.get("impact", {})
-            if "baseMetricV3" in impact:
-                cvss_v3 = impact["baseMetricV3"]["cvssV3"]
-                nvd_info["cvss_score"] = cvss_v3["baseScore"]
-                nvd_info["cve_vector"] = cvss_v3.get("vectorString", "")
-            elif "baseMetricV2" in impact:
-                cvss_v2 = impact["baseMetricV2"]["cvssV2"]
-                nvd_info["cvss_score"] = cvss_v2["baseScore"]
-                nvd_info["cve_vector"] = cvss_v2.get("vectorString", "")
-
-            if nvd_info:
-                nvd_data[cve_id] = nvd_info
-
-        CVDIO.import_nvdcve(arr, nvd_data)
 
     # ==================== NVD IMPORT ====================
 

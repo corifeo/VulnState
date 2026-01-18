@@ -45,7 +45,6 @@ from .constants import (
     ThreatState,
 )
 from .formatting import CVDFormatter
-from .io import CVDIO
 from .models import AnalysisResult
 from .vulnerability import TIMESTAMP_UNKNOWN, CVDVulnerability
 
@@ -60,7 +59,6 @@ __all__ = [
     "CVDAnalyzer",
     "AnalysisResult",
     # I/O
-    "CVDIO",
     "CVDFormatter",
     # Enums
     "HistoryValidity",

@@ -755,7 +755,7 @@ class TestNVDFileImport:
 
         # Import NVD data from file
         nvd_file = os.path.join(DATA_DIR, "nvd_sample.json")
-        CVDIO.import_nvd_file(arr, nvd_file)
+        arr.import_nvd_file(nvd_file)
 
         # Verify CVSS scores were imported
         assert arr[0].cvss_score == 6.1  # CVE-2024-001
@@ -771,7 +771,7 @@ class TestNVDFileImport:
         arr = CVDArray(vulns)
 
         nvd_file = os.path.join(DATA_DIR, "nvd_sample.json")
-        CVDIO.import_nvd_file(arr, nvd_file)
+        arr.import_nvd_file(nvd_file)
 
         # Verify vector strings were imported
         assert "CVSS:3.1" in arr[0].cve_vector
@@ -783,7 +783,7 @@ class TestNVDFileImport:
         arr = CVDArray(vulns)
 
         nvd_file = os.path.join(DATA_DIR, "nvd_sample.json")
-        CVDIO.import_nvd_file(arr, nvd_file)
+        arr.import_nvd_file(nvd_file)
 
         # Verify v2 score was used
         assert arr[0].cvss_score == 7.5
