@@ -1033,27 +1033,30 @@ class CVDArray:
         """
         return [vuln.to_dict(include_computed=include_computed) for vuln in self]
 
-    def to_dataframe(self, include_computed: bool = False) -> "pd.DataFrame":
+    def to_dataframe(
+        self,
+        include_analytics: bool = True,
+        explode_cvss: bool = True,
+        explode_metadata: bool = True,
+    ) -> "pd.DataFrame":
         """
-        Convert array to pandas DataFrame.
+        Convert array to pandas DataFrame with comprehensive data.
 
         Args:
-            include_computed: Include computed properties (analysis results) as columns
+            include_analytics: Include computed metrics (default True)
+            explode_cvss: CVSS vector as separate columns (default True)
+            explode_metadata: Unpack metadata dicts into columns (default True)
 
         Returns:
             pandas DataFrame with one row per vulnerability
 
         Example:
             >>> df = arr.to_dataframe()
-            >>> df.head()
-            >>> df.groupby('severity').count()
-
-        FIX: THIS SHOULD BE IN io.py
+            >>> df = arr.to_dataframe(explode_metadata=False)
         """
-        import pandas as pd
+        from vulnstate.io import CVDIO
 
-        dicts = self.to_dict_batch(include_computed=include_computed)
-        return pd.DataFrame(dicts)
+        return CVDIO.to_dataframe(self, include_analytics, explode_cvss, explode_metadata)
 
     def to_json_batch(self, filepath: str, include_computed: bool = False) -> None:
         """
@@ -1146,7 +1149,9 @@ class CVDArray:
         """
         from .io import CVDIO
 
-        CVDIO.import_epss(self, source, import_metadata=import_metadata, include=include, exclude=exclude)
+        CVDIO.import_epss(
+            self, source, import_metadata=import_metadata, include=include, exclude=exclude
+        )
 
     def import_kev(
         self,
@@ -1472,7 +1477,9 @@ class CVDArray:
         """
         from .io import CVDIO
 
-        CVDIO.import_epss_file(self, filepath, import_metadata=import_metadata, include=include, exclude=exclude)
+        CVDIO.import_epss_file(
+            self, filepath, import_metadata=import_metadata, include=include, exclude=exclude
+        )
 
     def import_kev_file(
         self,

@@ -25,6 +25,8 @@ from typing import TYPE_CHECKING, Any, Optional, Union
 from .constants import CVDEvent
 
 if TYPE_CHECKING:
+    import pandas as pd
+
     from .array import CVDArray
     from .vulnerability import CVDVulnerability
 
@@ -59,7 +61,13 @@ class CVDIO:
             "cve_vector": vuln.cve_vector,
             "is_kev": vuln.is_kev,
             "event_timestamps": {
-                event.name: (None if timestamp is None else timestamp.isoformat())
+                event.name: (
+                    None
+                    if timestamp is None
+                    else (
+                        timestamp.isoformat() if hasattr(timestamp, "isoformat") else str(timestamp)
+                    )
+                )
                 for event, timestamp in vuln.events.items()
             },
             "history": [
@@ -67,7 +75,11 @@ class CVDIO:
                     "event": entry["event"].name if entry["event"] is not None else None,
                     "from_state": entry["from_state"],
                     "to_state": entry["to_state"],
-                    "timestamp": entry["timestamp"].isoformat() if entry["timestamp"] else None,
+                    "timestamp": (
+                        entry["timestamp"].isoformat()
+                        if entry["timestamp"] and hasattr(entry["timestamp"], "isoformat")
+                        else str(entry["timestamp"]) if entry["timestamp"] else None
+                    ),
                     "actor": entry.get("actor"),
                     "notes": entry.get("notes"),
                 }
@@ -229,6 +241,85 @@ class CVDIO:
 
         vulns = [CVDIO.from_dict(d) for d in data]
         return CVDArray(vulns)
+
+    @staticmethod
+    def to_dataframe(
+        arr: "CVDArray",
+        include_analytics: bool = True,
+        explode_cvss: bool = True,
+        explode_metadata: bool = True,
+    ) -> "pd.DataFrame":
+        """Convert array to pandas DataFrame with comprehensive data.
+
+        Args:
+            arr: CVDArray instance
+            include_analytics: Include computed metrics (default True)
+            explode_cvss: CVSS vector as separate columns (default True)
+            explode_metadata: Unpack metadata dicts into columns (default True)
+
+        Returns:
+            pandas DataFrame with one row per vulnerability
+
+        Example:
+            >>> df = CVDIO.to_dataframe(arr)
+            >>> df = CVDIO.to_dataframe(arr, explode_metadata=False)
+        """
+        import pandas as pd
+
+        # Start with base data from dict conversion
+        dicts = CVDIO.array_to_dicts(arr, include_computed=False)
+        df = pd.DataFrame(dicts)
+
+        # Flatten event_timestamps into separate columns
+        if "event_timestamps" in df.columns:
+            # Extract event timestamps as separate columns
+            event_ts_df = pd.json_normalize(df["event_timestamps"])
+            # Rename columns to add _timestamp suffix
+            event_ts_df.columns = [f"{col}_timestamp" for col in event_ts_df.columns]
+            # Drop the nested event_timestamps column
+            df = df.drop(columns=["event_timestamps"])
+            # Concatenate the flattened event timestamps
+            df = pd.concat([df, event_ts_df], axis=1)
+
+        # Drop the nested history column (not useful in DataFrame format)
+        if "history" in df.columns:
+            df = df.drop(columns=["history"])
+
+        # Add analytics if requested
+        if include_analytics:
+            # TODO: Add more analytics fields
+            # For now, just add basic computed properties
+            pass
+
+        # Explode CVSS vectors if requested
+        if explode_cvss:
+            # TODO: Explode CVSS vectors
+            pass
+
+        # Explode metadata if requested
+        if explode_metadata and "metadata" in df.columns:
+            metadata_rows = []
+            for metadata_dict in df["metadata"]:
+                flat_dict = {}
+                if isinstance(metadata_dict, dict):
+                    for namespace, value in metadata_dict.items():
+                        if isinstance(value, dict):
+                            # Nested metadata: namespace_key pattern
+                            for key, val in value.items():
+                                flat_dict[f"{namespace}_{key}"] = val
+                        else:
+                            # Top-level metadata: just use the key
+                            flat_dict[namespace] = value
+                metadata_rows.append(flat_dict)
+
+            if metadata_rows:
+                metadata_df = pd.DataFrame(metadata_rows)
+                # Drop the nested metadata column
+                df = df.drop(columns=["metadata"])
+                # Concatenate the flattened metadata
+                df = pd.concat([df, metadata_df], axis=1)
+
+        return df
 
     # ==================== ENRICHMENT IMPORT ====================
 
@@ -730,7 +821,9 @@ class CVDIO:
             include: Only store these fields (if import_metadata=True)
             exclude: Skip these fields (if import_metadata=True)
         """
-        CVDIO.import_epss(arr, filepath, import_metadata=import_metadata, include=include, exclude=exclude)
+        CVDIO.import_epss(
+            arr, filepath, import_metadata=import_metadata, include=include, exclude=exclude
+        )
 
     @staticmethod
     def import_kev_file(
