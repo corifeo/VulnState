@@ -139,17 +139,19 @@ class CVDArray:
 
         # Event timestamps as parallel arrays (backward compatibility dict)
         self._metadata_data.event_timestamps_absolute = {}
-        for event in CVDEvent:
-            timestamps = []
-            for v in vulnerabilities:
-                ts = v.event_data.events.get(event)
-                if ts:
-                    timestamps.append(np.datetime64(ts, "us"))
-                else:
-                    timestamps.append(np.datetime64("NaT", "us"))
-            self._metadata_data.event_timestamps_absolute[event] = np.array(
-                timestamps, dtype="datetime64[us]"
-            )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            for event in CVDEvent:
+                timestamps = []
+                for v in vulnerabilities:
+                    ts = v.event_data.events.get(event)
+                    if ts:
+                        timestamps.append(np.datetime64(ts, "us"))
+                    else:
+                        timestamps.append(np.datetime64("NaT", "us"))
+                self._metadata_data.event_timestamps_absolute[event] = np.array(
+                    timestamps, dtype="datetime64[us]"
+                )
 
         # Metadata - extract all fields including cvss_score
         if not vulnerabilities:
@@ -779,19 +781,21 @@ class CVDArray:
             self.core.vuln_ids[idx] = vuln.identity.vuln_id
 
             # Extract timestamps to exploded arrays
-            for event, attr_name in [
-                (CVDEvent.V, "V"),
-                (CVDEvent.F, "F"),
-                (CVDEvent.D, "D"),
-                (CVDEvent.P, "P"),
-                (CVDEvent.X, "X"),
-                (CVDEvent.A, "A"),
-            ]:
-                ts = vuln.event_data.events.get(event)
-                if ts:
-                    getattr(self.timestamps, attr_name)[idx] = np.datetime64(ts, "us")
-                else:
-                    getattr(self.timestamps, attr_name)[idx] = np.datetime64("NaT")
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                for event, attr_name in [
+                    (CVDEvent.V, "V"),
+                    (CVDEvent.F, "F"),
+                    (CVDEvent.D, "D"),
+                    (CVDEvent.P, "P"),
+                    (CVDEvent.X, "X"),
+                    (CVDEvent.A, "A"),
+                ]:
+                    ts = vuln.event_data.events.get(event)
+                    if ts:
+                        getattr(self.timestamps, attr_name)[idx] = np.datetime64(ts, "us")
+                    else:
+                        getattr(self.timestamps, attr_name)[idx] = np.datetime64("NaT")
 
         # Clear dirty flags
         self._dirty_indices -= to_sync
