@@ -665,7 +665,7 @@ class TestEPSSFileImport:
 
         # Import EPSS scores from file
         epss_file = os.path.join(DATA_DIR, "epss_sample.csv")
-        CVDIO.import_epss_file(arr, epss_file)
+        CVDIO.import_epss(arr, epss_file)
 
         # Verify scores were imported
         assert arr[0].epss == pytest.approx(0.85432)
@@ -681,7 +681,7 @@ class TestEPSSFileImport:
         arr = CVDArray(vulns)
 
         epss_file = os.path.join(DATA_DIR, "epss_sample.csv")
-        CVDIO.import_epss_file(arr, epss_file)
+        CVDIO.import_epss(arr, epss_file)
 
         # First CVE should have score
         assert arr[0].epss == pytest.approx(0.85432)
@@ -698,7 +698,7 @@ class TestEPSSFileImport:
 
         # Use convenience method
         epss_file = os.path.join(DATA_DIR, "epss_sample.csv")
-        arr.import_epss_file(epss_file)
+        arr.import_epss(epss_file)
 
         assert arr[0].epss == pytest.approx(0.85432)
         assert arr[1].epss == pytest.approx(0.42156)
@@ -718,7 +718,7 @@ class TestKEVFileImport:
 
         # Import KEV catalog from file
         kev_file = os.path.join(DATA_DIR, "kev_sample.csv")
-        CVDIO.import_kev_file(arr, kev_file)
+        CVDIO.import_kev(arr, kev_file)
 
         # Verify KEV flags were set
         assert arr[0].is_kev is True  # CVE-2021-44228
@@ -735,7 +735,7 @@ class TestKEVFileImport:
 
         # Use convenience method
         kev_file = os.path.join(DATA_DIR, "kev_sample.csv")
-        arr.import_kev_file(kev_file)
+        arr.import_kev(kev_file)
 
         assert arr[0].is_kev is True
         assert arr[1].is_kev is True
@@ -823,8 +823,8 @@ class TestIntegratedWorkflow:
         kev_file = os.path.join(DATA_DIR, "kev_sample.csv")
         nvd_file = os.path.join(DATA_DIR, "nvd_sample.json")
 
-        arr.import_epss_file(epss_file)
-        arr.import_kev_file(kev_file)
+        arr.import_epss(epss_file)
+        arr.import_kev(kev_file)
         arr.import_nvd_file(nvd_file)
 
         # Verify CVE-2024-001 has all three enrichments
@@ -852,7 +852,7 @@ class TestFileImportErrorHandling:
         arr = CVDArray(vulns)
 
         with pytest.raises(FileNotFoundError):
-            arr.import_epss_file("nonexistent.csv")
+            arr.import_epss("nonexistent.csv")
 
     def test_import_malformed_csv(self, tmp_path):
         """Test import from malformed CSV raises error."""
@@ -864,7 +864,7 @@ class TestFileImportErrorHandling:
         arr = CVDArray(vulns)
 
         with pytest.raises(KeyError):
-            arr.import_epss_file(str(malformed))
+            arr.import_epss(str(malformed))
 
     def test_import_malformed_json(self, tmp_path):
         """Test import from malformed JSON raises error."""

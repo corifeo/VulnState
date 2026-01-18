@@ -1339,6 +1339,22 @@ class CVDArray:
             exclude,
         )
 
+    def import_nvd_file(self, filepath: str) -> None:
+        """
+        Import NVD data from JSON file (convenience wrapper).
+
+        Delegates to CVDIO.import_nvd_file().
+
+        Args:
+            filepath: Path to NVD JSON file
+
+        Example:
+            >>> arr.import_nvd_file('data/nvdcve-1.1-2024.json')
+        """
+        from .io import CVDIO
+
+        CVDIO.import_nvd_file(self, filepath)
+
     # ==================== FACTORY METHODS ====================
 
     @classmethod
@@ -1452,74 +1468,3 @@ class CVDArray:
             vulns.append(vuln)
         return cls(vulns)
 
-    # ==================== FILE-BASED IMPORT CONVENIENCE METHODS ====================
-
-    def import_epss_file(
-        self,
-        filepath: str,
-        import_metadata: bool = False,
-        include: Optional[list[str]] = None,
-        exclude: Optional[list[str]] = None,
-    ) -> None:
-        """
-        Import EPSS scores from CSV file (convenience wrapper).
-
-        Delegates to CVDIO.import_epss_file().
-
-        Args:
-            filepath: Path to EPSS CSV file
-            import_metadata: Store full EPSS data in vuln.metadata['epss'] (default False)
-            include: Only store these fields (if import_metadata=True)
-            exclude: Skip these fields (if import_metadata=True)
-
-        Example:
-            >>> arr.import_epss_file('data/epss_scores.csv')
-        """
-        from .io import CVDIO
-
-        CVDIO.import_epss_file(
-            self, filepath, import_metadata=import_metadata, include=include, exclude=exclude
-        )
-
-    def import_kev_file(
-        self,
-        filepath: str,
-        apply_event: bool = True,
-        import_metadata: bool = False,
-        include: Optional[list[str]] = None,
-        exclude: Optional[list[str]] = None,
-    ) -> None:
-        """
-        Import KEV catalog from CSV file (convenience wrapper).
-
-        Delegates to CVDIO.import_kev_file().
-
-        Args:
-            filepath: Path to KEV CSV file
-            apply_event: Apply event A with dateAdded timestamp (default True)
-            import_metadata: Store full KEV data in metadata['kev'] (default False)
-            include: Only store these fields (if import_metadata=True)
-            exclude: Skip these fields (if import_metadata=True)
-
-        Example:
-            >>> arr.import_kev_file('data/known_exploited_vulnerabilities.csv')
-        """
-        from .io import CVDIO
-
-        CVDIO.import_kev_file(self, filepath, apply_event, import_metadata, include, exclude)
-
-    def import_nvd_file(self, filepath: str) -> None:
-        """
-        Import NVD data from JSON file (convenience wrapper).
-
-        Delegates to CVDIO.import_nvd_file().
-
-        Args:
-            filepath: Path to NVD JSON file
-
-        Example:
-            >>> arr.import_nvd_file('data/nvdcve-1.1-2024.json')
-        """
-        from .io import CVDIO
-
-        CVDIO.import_nvd_file(self, filepath)
