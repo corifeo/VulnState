@@ -1156,3 +1156,45 @@ class TestGenericCSVImport:
             assert vuln.events[CVDEvent.F] == np.datetime64("2024-02-01")
         finally:
             os.unlink(csv_path)
+
+
+def test_import_json_nested_fields():
+    """JSON import handles nested field paths."""
+    import json
+    import tempfile
+
+    import numpy as np
+
+    from vulnstate import CVDArray, CVDEvent
+
+    # Create test JSON
+    data = [
+        {
+            "vulnerability": {"cve_id": "CVE-2024-0001"},
+            "threat_intel": {"first_observed": "2024-03-01"}
+        }
+    ]
+
+    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as f:
+        json.dump(data, f)
+        json_path = f.name
+
+    try:
+        arr = CVDArray.zeros(1)
+        arr.get(0).identity.cve_id = "CVE-2024-0001"
+        arr._metadata_raw["_cve_id"][0] = "CVE-2024-0001"
+        arr.sync()
+
+        arr.import_json(
+            source=json_path,
+            cve_field='vulnerability.cve_id',
+            event=CVDEvent.A,
+            timestamp_field='threat_intel.first_observed',
+            apply_event=True
+        )
+
+        vuln = arr.get(0)
+        assert vuln.has_event_occurred(CVDEvent.A)
+        assert vuln.events[CVDEvent.A] == np.datetime64('2024-03-01')
+    finally:
+        os.unlink(json_path)

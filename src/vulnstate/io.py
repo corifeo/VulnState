@@ -8,6 +8,7 @@ Provides:
   - save_json/load_json: JSON file I/O
   - import_epss/import_kev/import_nvdcve: Dict-based enrichment import
   - import_csv: Generic CSV import for any CVD event with timestamps
+  - import_json: Generic JSON import with nested field support (dot notation)
   - import_epss_file/import_kev_file/import_nvd_file: File-based import
   - from_nvd: Create array from NVD JSON items
 
@@ -558,6 +559,141 @@ class CVDIO:
                 # Store metadata
                 if import_metadata and metadata_namespace:
                     metadata_dict = dict(csv_row)
+
+                    # Apply include/exclude filters
+                    if include is not None:
+                        metadata_dict = {k: v for k, v in metadata_dict.items() if k in include}
+                    if exclude is not None:
+                        metadata_dict = {k: v for k, v in metadata_dict.items() if k not in exclude}
+
+                    if metadata_namespace not in vuln.metadata:
+                        vuln.metadata[metadata_namespace] = {}
+                    vuln.metadata[metadata_namespace].update(metadata_dict)
+        else:
+            # TODO: Handle expunged _vulnerabilities
+            pass
+
+    @staticmethod
+    def import_json(
+        arr: "CVDArray",
+        source: Union[str, list[dict[str, Any]]],
+        cve_field: str,
+        event: CVDEvent,
+        timestamp_field: str,
+        apply_event: bool = True,
+        metadata_namespace: Optional[str] = None,
+        import_metadata: bool = False,
+        include: Optional[list[str]] = None,
+        exclude: Optional[list[str]] = None,
+    ) -> None:
+        """
+        Generic JSON import that applies any CVD event with timestamps.
+
+        This method enables importing data from JSON files or lists of dicts
+        with nested field access using dot notation (e.g., "vulnerability.cve_id").
+        Supports both JSON arrays and newline-delimited JSON.
+
+        Args:
+            arr: CVDArray instance to update
+            source: Filepath to JSON or list of dicts
+            cve_field: Field path to CVE IDs (supports dot notation for nested fields)
+            event: CVD event to apply (V, F, D, P, X, or A)
+            timestamp_field: Field path to event timestamps (supports dot notation)
+            apply_event: Apply event with timestamp (default True)
+            metadata_namespace: Namespace for storing row metadata (default: None)
+            import_metadata: Store full row in vuln.metadata[namespace] (default False)
+            include: Only store these fields (if import_metadata=True)
+            exclude: Skip these fields (if import_metadata=True)
+
+        Example:
+            # Import from nested JSON structure
+            >>> arr.import_json(
+            ...     source='threat_intel.json',
+            ...     cve_field='vulnerability.cve_id',
+            ...     event=CVDEvent.A,
+            ...     timestamp_field='threat_intel.first_observed',
+            ...     apply_event=True
+            ... )
+
+            # Import with metadata storage
+            >>> arr.import_json(
+            ...     source='vendor_data.json',
+            ...     cve_field='cve.id',
+            ...     event=CVDEvent.F,
+            ...     timestamp_field='patch.release_date',
+            ...     apply_event=True,
+            ...     import_metadata=True,
+            ...     metadata_namespace='vendor'
+            ... )
+        """
+        import numpy as np
+
+        def get_nested(data: dict[str, Any], path: str) -> Any:
+            """Extract nested value using dot notation."""
+            keys = path.split(".")
+            value = data
+            for key in keys:
+                if isinstance(value, dict) and key in value:
+                    value = value[key]
+                else:
+                    return None
+            return value
+
+        # Parse source
+        if isinstance(source, str):
+            # Read from JSON file
+            with open(source) as f:
+                content = f.read().strip()
+                # Try to parse as JSON array first
+                try:
+                    json_data = json.loads(content)
+                    if not isinstance(json_data, list):
+                        # Single object -> wrap in list
+                        json_data = [json_data]
+                except json.JSONDecodeError:
+                    # Try newline-delimited JSON
+                    json_data = [json.loads(line) for line in content.split("\n") if line.strip()]
+        else:
+            # List of dicts
+            json_data = source
+
+        # Build lookup dict by CVE ID
+        cve_lookup: dict[str, dict[str, Any]] = {}
+        for row in json_data:
+            cve_id = get_nested(row, cve_field)
+            if cve_id:
+                cve_lookup[str(cve_id)] = row
+
+        # Get CVE IDs from array
+        if "_cve_id" not in arr._metadata_raw:
+            return
+
+        cve_ids = arr._metadata_raw["_cve_id"]
+
+        # Process each vulnerability
+        if arr._vulnerabilities is not None and len(arr._vulnerabilities) > 0:
+            for i in range(len(arr)):
+                cve_id = str(cve_ids[i])
+                if not cve_id or cve_id not in cve_lookup:
+                    continue
+
+                vuln = arr.get(i)
+                json_row = cve_lookup[cve_id]
+
+                # Apply event with timestamp
+                if apply_event and timestamp_field:
+                    timestamp_value = get_nested(json_row, timestamp_field)
+                    if timestamp_value:
+                        timestamp = np.datetime64(timestamp_value)
+                        try:
+                            vuln.apply_event(event, timestamp)
+                        except ValueError:
+                            # Event constraints violated, skip
+                            pass
+
+                # Store metadata
+                if import_metadata and metadata_namespace:
+                    metadata_dict = dict(json_row)
 
                     # Apply include/exclude filters
                     if include is not None:

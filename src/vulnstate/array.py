@@ -1251,6 +1251,89 @@ class CVDArray:
             exclude,
         )
 
+    def import_json(
+        self,
+        source: Union[str, list[dict[str, Any]]],
+        cve_field: str,
+        event: CVDEvent,
+        timestamp_field: str,
+        apply_event: bool = True,
+        metadata_namespace: Optional[str] = None,
+        import_metadata: bool = False,
+        include: Optional[list[str]] = None,
+        exclude: Optional[list[str]] = None,
+    ) -> None:
+        """
+        Generic JSON import that applies any CVD event with timestamps.
+
+        Supports nested field access using dot notation (e.g., "vulnerability.cve_id"
+        accesses {"vulnerability": {"cve_id": "CVE-2024-001"}}).
+
+        This method enables importing data from JSON files or lists of dicts
+        with complex nested structures. It can match CVEs using nested paths
+        and apply the specified event with a timestamp, optionally storing
+        the full record in metadata.
+
+        Delegates to CVDIO for implementation.
+
+        Args:
+            source: Filepath to JSON or list of dicts
+            cve_field: Field path to CVE IDs (supports dot notation for nested fields)
+            event: CVD event to apply (V, F, D, P, X, or A)
+            timestamp_field: Field path to event timestamps (supports dot notation)
+            apply_event: Apply event with timestamp (default True)
+            metadata_namespace: Namespace for storing row metadata (default: None)
+            import_metadata: Store full row in vuln.metadata[namespace] (default False)
+            include: Only store these fields (if import_metadata=True)
+            exclude: Skip these fields (if import_metadata=True)
+
+        Example:
+            # Import from nested JSON structure
+            >>> arr.import_json(
+            ...     source='threat_intel.json',
+            ...     cve_field='vulnerability.cve_id',
+            ...     event=CVDEvent.A,
+            ...     timestamp_field='threat_intel.first_observed',
+            ...     apply_event=True
+            ... )
+
+            # Import vendor patches with metadata
+            >>> arr.import_json(
+            ...     source='vendor_data.json',
+            ...     cve_field='cve.id',
+            ...     event=CVDEvent.F,
+            ...     timestamp_field='patch.release_date',
+            ...     apply_event=True,
+            ...     import_metadata=True,
+            ...     metadata_namespace='vendor'
+            ... )
+
+            # Import from list of dicts (API response)
+            >>> threat_data = [
+            ...     {"vuln": {"id": "CVE-2024-001"}, "observed": "2024-03-01"}
+            ... ]
+            >>> arr.import_json(
+            ...     source=threat_data,
+            ...     cve_field='vuln.id',
+            ...     event=CVDEvent.A,
+            ...     timestamp_field='observed'
+            ... )
+        """
+        from .io import CVDIO
+
+        CVDIO.import_json(
+            self,
+            source,
+            cve_field,
+            event,
+            timestamp_field,
+            apply_event,
+            metadata_namespace,
+            import_metadata,
+            include,
+            exclude,
+        )
+
     # ==================== FACTORY METHODS ====================
 
     @classmethod
