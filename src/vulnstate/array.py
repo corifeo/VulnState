@@ -1095,6 +1095,25 @@ class CVDArray:
         vulns = [CVDVulnerability.from_dict(data) for data in data_list]
         return cls(vulns)
 
+    @classmethod
+    def from_nvd(cls, cve_items: list[dict[str, Any]]) -> "CVDArray":
+        """
+        Create CVDArray from NVD JSON feed.
+
+        Args:
+            cve_items: List of CVE items from NVD feed
+
+        Returns:
+            CVDArray with vulnerabilities from NVD data
+
+        Example:
+            >>> with open("nvdcve-1.1-2024.json") as f:
+            ...     data = json.load(f)
+            >>> arr = CVDArray.from_nvd(data["CVE_Items"])
+        """
+        from vulnstate.io import CVDIO
+        return CVDIO.from_nvd(cve_items)
+
     def save_pickle_batch(self, filepath: str) -> None:
         """
         Save all vulnerabilities to pickle file (fast).
