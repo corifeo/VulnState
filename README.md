@@ -10,7 +10,7 @@ Based on: *"A State-Based Model for Multi-Party Coordinated Vulnerability Disclo
 - **Performance**: Vectorized batch operations via numpy
 - **Analytics**: Zero-day detection, coordination quality, fix effectiveness metrics
 - **Type Safe**: Full type hints with mypy --strict validation
-- **Well Tested**: 270+ tests
+- **Well Tested**: 350+ tests with comprehensive coverage
 
 ## Installation
 
@@ -89,18 +89,26 @@ print(vuln.is_zero_day)  # True
 ### Data Import
 
 ```python
-from vulnstate import CVDArray, CVDIO
+from vulnstate import CVDArray
 
 arr = CVDArray.zeros(100)
 
 # Import EPSS scores
-CVDIO.import_epss_file(arr, 'epss_scores.csv')
+arr.import_epss('epss_scores.csv')
 
-# Import KEV list
-CVDIO.import_kev_file(arr, 'known_exploited.csv')
+# Import KEV list (applies event A automatically)
+arr.import_kev('known_exploited.csv')
 
-# Import from NVD JSON
-arr = CVDIO.import_nvd_file('nvdcve-1.1-2024.json')
+# Import from NVD JSON (supports both 1.1 and 2.0 formats)
+arr.import_nvd('nvdcve-1.1-2024.json')
+
+# Import from multiple NVD files using glob pattern
+count = arr.import_nvd_glob('nvdcve-*.json')
+print(f"Loaded from {count} files")
+
+# Create array from NVD file directly
+from vulnstate.parsers import NVDParser
+arr = NVDParser.from_nvd([...])  # Pass NVD items
 ```
 
 ## Architecture
@@ -113,7 +121,8 @@ arr = CVDIO.import_nvd_file('nvdcve-1.1-2024.json')
 | `vulnerability.py` | CVDVulnerability - single instance state machine |
 | `array.py` | CVDArray - vectorized batch container |
 | `analyzer.py` | CVDAnalyzer - computed analytics |
-| `io.py` | CVDIO - JSON/dict/file import/export |
+| `io.py` | CVDIO - generic I/O operations and serialization |
+| `parsers.py` | NVDParser - NVD JSON parsing (1.1 and 2.0 formats) |
 | `formatting.py` | CVDFormatter - rich console output |
 | `models.py` | Data models and AnalysisResult |
 
