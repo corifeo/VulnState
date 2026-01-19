@@ -1124,6 +1124,39 @@ class CVDArray:
         from vulnstate.io import CVDIO
         CVDIO.import_nvd(self, source, apply_event, import_metadata, include, exclude, skip_existing)
 
+    def import_nvd_glob(
+        self,
+        pattern: str,
+        apply_event: bool = True,
+        import_metadata: bool = False,
+        include: Optional[list[str]] = None,
+        exclude: Optional[list[str]] = None,
+        skip_existing: bool = True,
+    ) -> int:
+        """
+        Import NVD data from multiple files matching a glob pattern.
+
+        Args:
+            pattern: Glob pattern for NVD JSON files (e.g., 'nvdcve-*.json')
+            apply_event: Apply event P (Public) from publishedDate (default: True)
+            import_metadata: Store full NVD record in metadata['nvd'] (default: False)
+            include: Only import these metadata fields
+            exclude: Skip these metadata fields
+            skip_existing: Skip CVEs already in array (default: True)
+
+        Returns:
+            Number of files processed
+
+        Example:
+            >>> arr = CVDArray.zeros(0)
+            >>> count = arr.import_nvd_glob('nvdcve-2.0-*.json')
+            >>> print(f"Loaded from {count} files")
+        """
+        from vulnstate.io import CVDIO
+        return CVDIO.import_nvd_glob(
+            self, pattern, apply_event, import_metadata, include, exclude, skip_existing
+        )
+
     def save_pickle_batch(self, filepath: str) -> None:
         """
         Save all vulnerabilities to pickle file (fast).

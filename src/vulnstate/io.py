@@ -17,7 +17,6 @@ import contextlib
 import csv
 import json
 import pickle
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional, Union
 
@@ -34,6 +33,51 @@ if TYPE_CHECKING:
 
 class CVDIO:
     """Internal I/O implementation - users interact via CVDArray methods."""
+
+    @staticmethod
+    def _resolve_source(source: Union[str, Path]) -> str:
+        """
+        Resolve source to a local file path, downloading from URL if needed.
+
+        Args:
+            source: Local file path or HTTP(S) URL
+
+        Returns:
+            Local file path (downloaded to temp file if URL)
+
+        Note:
+            Requires 'requests' package for URL downloads. Falls back gracefully
+            if requests is not available.
+        """
+        source_str = str(source)
+
+        # Check if it's a URL
+        if source_str.startswith(("http://", "https://")):
+            try:
+                import tempfile
+
+                import requests
+
+                # Download to temp file
+                response = requests.get(source_str, timeout=30)
+                response.raise_for_status()
+
+                # Create temp file with appropriate extension
+                suffix = ".csv" if source_str.endswith(".csv") else ".json"
+                with tempfile.NamedTemporaryFile(mode="w", suffix=suffix, delete=False) as f:
+                    f.write(response.text)
+                    return f.name
+
+            except ImportError:
+                raise ImportError(
+                    "URL support requires 'requests' package. "
+                    "Install with: pip install requests"
+                ) from None
+            except Exception as e:
+                raise ValueError(f"Failed to download from URL: {e}") from e
+
+        # Return local path as-is
+        return source_str
 
     @staticmethod
     def import_kev(
@@ -55,15 +99,16 @@ class CVDIO:
             include: Only store these fields (if import_metadata=True)
             exclude: Skip these fields (if import_metadata=True)
         """
-        import csv
 
         import numpy as np
 
         # Parse source
         if isinstance(source, str):
+            # Resolve URL or local path
+            local_path = CVDIO._resolve_source(source)
             # Read from CSV file
             kev_data = {}
-            with open(source) as f:
+            with open(local_path, encoding="utf-8") as f:
                 reader = csv.DictReader(f)
                 for row in reader:
                     cve_id = row["cveID"]
@@ -95,6 +140,15 @@ class CVDIO:
                 arr._metadata_raw["is_kev"][i] = True
                 vuln.is_kev = True
 
+                # Extract key fields to top-level metadata for DataFrame export
+                # This matches the notebook's column naming
+                if "vendorProject" in kev_row:
+                    vuln.metadata["vendor"] = kev_row["vendorProject"]
+                if "product" in kev_row:
+                    vuln.metadata["product"] = kev_row["product"]
+                if "shortDescription" in kev_row:
+                    vuln.metadata["description"] = kev_row["shortDescription"]
+
                 # Apply event A
                 if apply_event and "dateAdded" in kev_row:
                     date_added = np.datetime64(kev_row["dateAdded"])
@@ -119,35 +173,6 @@ class CVDIO:
             # TODO: Handle expunged _vulnerabilities
             pass
 
-    @staticmethod
-    def import_nvdcve(arr: "CVDArray", nvd_data: dict[str, dict[str, Any]]) -> None:
-        """Import NVD data into array.
-
-        Args:
-            arr: CVDArray instance to update
-            nvd_data: Dict mapping CVE IDs to NVD data dicts
-
-        Note: This method is internal. Use arr.import_nvd() instead.
-        """
-        # Enrich existing vulnerabilities with CVSS data
-        if arr._vulnerabilities is not None and len(arr._vulnerabilities) > 0:
-            for i in range(len(arr)):
-                vuln = arr.get(i)
-                cve_id = vuln.identity.vuln_id
-
-                if cve_id in nvd_data:
-                    item = nvd_data[cve_id]
-
-                    # Extract CVSS score
-                    impact = item.get("impact", {})
-                    if "baseMetricV3" in impact:
-                        cvss_v3 = impact["baseMetricV3"].get("cvssV3", {})
-                        vuln.cvss_score = cvss_v3.get("baseScore")
-                        vuln.cve_vector = cvss_v3.get("vectorString")
-                    elif "baseMetricV2" in impact:
-                        cvss_v2 = impact["baseMetricV2"].get("cvssV2", {})
-                        vuln.cvss_score = cvss_v2.get("baseScore")
-                        vuln.cve_vector = cvss_v2.get("vectorString")
 
     @staticmethod
     def import_epss(
@@ -167,14 +192,17 @@ class CVDIO:
             include: Only store these fields (if import_metadata=True)
             exclude: Skip these fields (if import_metadata=True)
         """
-        import csv
 
         # Parse source
         if isinstance(source, str):
+            # Resolve URL or local path
+            local_path = CVDIO._resolve_source(source)
             # Read from CSV file
             epss_data = {}
-            with open(source) as f:
-                reader = csv.DictReader(f)
+            with open(local_path, encoding="utf-8") as f:
+                # Skip comment lines (EPSS files start with #model_version...)
+                lines = [line for line in f if not line.startswith('#')]
+                reader = csv.DictReader(lines)
                 for row in reader:
                     cve_id = row["cve"]
                     if import_metadata:
@@ -216,13 +244,29 @@ class CVDIO:
                         vuln.metadata["epss"] = {}
                     vuln.metadata["epss"].update(metadata_dict)
 
-                    # Also set epss score attribute for backward compatibility
+                    # Also set epss score attribute for backward compatibility (handle both "epss" and "score" keys)
                     if "epss" in metadata_dict:
                         vuln.epss = float(metadata_dict["epss"])
+                    elif "score" in metadata_dict:
+                        vuln.epss = float(metadata_dict["score"])
+
+                    # Extract percentile to top-level metadata for DataFrame export
+                    if "percentile" in metadata_dict:
+                        vuln.metadata["epss_percentile"] = float(metadata_dict["percentile"])
                 else:
-                    # Just set score
-                    score = epss_value if isinstance(epss_value, float) else float(epss_value.get("epss", 0))
+                    # Just set score (handle both "epss" and "score" keys for backward compatibility)
+                    if isinstance(epss_value, float):
+                        score = epss_value
+                    elif isinstance(epss_value, dict):
+                        # Try "score" first (test format), then "epss" (CSV format)
+                        score = float(epss_value.get("score", epss_value.get("epss", 0)))
+                    else:
+                        score = float(epss_value)
                     vuln.epss = score
+
+                    # Also extract percentile if it's a dict
+                    if isinstance(epss_value, dict) and "percentile" in epss_value:
+                        vuln.metadata["epss_percentile"] = float(epss_value["percentile"])
         else:
             # TODO: Handle expunged _vulnerabilities
             pass
@@ -255,13 +299,15 @@ class CVDIO:
             include: Only store these fields (if import_metadata=True)
             exclude: Skip these fields (if import_metadata=True)
         """
-        import csv
 
         import numpy as np
 
+        # Resolve URL or local path
+        local_path = CVDIO._resolve_source(source)
+
         # Read CSV
         csv_data = {}
-        with open(source) as f:
+        with open(local_path, encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
                 if cve_field not in row:
@@ -336,7 +382,6 @@ class CVDIO:
             include: Only store these fields (if import_metadata=True)
             exclude: Skip these fields (if import_metadata=True)
         """
-        import numpy as np
 
         def get_nested(data: dict[str, Any], path: str) -> Any:
             """Extract value from nested dict using dot notation."""
@@ -351,7 +396,9 @@ class CVDIO:
 
         # Parse source
         if isinstance(source, str):
-            with open(source) as f:
+            # Resolve URL or local path
+            local_path = CVDIO._resolve_source(source)
+            with open(local_path, encoding="utf-8") as f:
                 json_data_list = json.load(f)
         else:
             json_data_list = source
@@ -414,224 +461,32 @@ class CVDIO:
         exclude: Optional[list[str]] = None,
         skip_existing: bool = False,
     ) -> None:
-        """
-        Import NVD vulnerability data.
+        """Import NVD data (delegates to NVDParser)."""
+        from .parsers import NVDParser
 
-        Args:
-            arr: CVDArray instance to update
-            source: Path to NVD JSON file or list of CVE items
-            apply_event: Apply event P (Public) from publishedDate (default True)
-            import_metadata: Store full NVD record in metadata['nvd'] (default False)
-            include: Only import these metadata fields
-            exclude: Skip these metadata fields
-            skip_existing: Skip CVEs already in array (default False)
-        """
-        from .array import CVDArray
-        from .vulnerability import CVDVulnerability
-
-        # Parse source
-        if isinstance(source, str):
-            with open(source) as f:
-                nvd_feed = json.load(f)
-            nvd_items = nvd_feed.get("CVE_Items", nvd_feed.get("vulnerabilities", []))
-        else:
-            nvd_items = source
-
-        # If array is empty, treat all items as new
-        if len(arr) == 0:
-            new_vulns = []
-            for item in nvd_items:
-                cve_id = item.get("cve", {}).get("CVE_data_meta", {}).get("ID")
-                if not cve_id:
-                    continue
-
-                vuln = CVDIO._create_vuln_from_nvd_item(cve_id, item)
-
-                # Store metadata if requested
-                if import_metadata:
-                    metadata_dict = dict(item)
-                    if include is not None:
-                        metadata_dict = {k: v for k, v in metadata_dict.items() if k in include}
-                    if exclude is not None:
-                        metadata_dict = {k: v for k, v in metadata_dict.items() if k not in exclude}
-                    if "nvd" not in vuln.metadata:
-                        vuln.metadata["nvd"] = {}
-                    vuln.metadata["nvd"].update(metadata_dict)
-
-                new_vulns.append(vuln)
-
-            # Initialize array with new vulns using _from_list
-            arr._from_list(new_vulns)
-            return
-
-        # Build set of existing CVE IDs for O(1) lookup
-        existing_cves = set()
-        if "_cve_id" in arr._metadata_raw:
-            existing_cves = {str(cve_id) for cve_id in arr._metadata_raw["_cve_id"]}
-
-        # Build index of existing vulnerabilities by CVE ID
-        cve_to_index = {}
-        if arr._vulnerabilities is not None and len(arr._vulnerabilities) > 0:
-            for i in range(len(arr)):
-                vuln = arr.get(i)
-                cve_to_index[vuln.cve_id] = i
-
-        new_vulns = []
-
-        # Process NVD items
-        for item in nvd_items:
-            # Extract CVE ID
-            cve_id = item.get("cve", {}).get("CVE_data_meta", {}).get("ID")
-            if not cve_id:
-                continue
-
-            if cve_id in existing_cves:
-                if skip_existing:
-                    continue
-
-                # Update existing vulnerability
-                idx = cve_to_index.get(cve_id)
-                if idx is not None:
-                    vuln = arr.get(idx)
-
-                    # Update CVSS score and vector
-                    impact = item.get("impact", {})
-                    if "baseMetricV3" in impact:
-                        cvss_v3 = impact["baseMetricV3"].get("cvssV3", {})
-                        cvss_score = cvss_v3.get("baseScore")
-                        cvss_vector = cvss_v3.get("vectorString")
-                        vuln.cvss_score = cvss_score
-                        vuln.cve_vector = cvss_vector
-                        # Update metadata arrays
-                        if "cvss_score" in arr._metadata_raw:
-                            arr._metadata_raw["cvss_score"][idx] = cvss_score
-                        if "cve_vector" in arr._metadata_raw:
-                            arr._metadata_raw["cve_vector"][idx] = cvss_vector
-                    elif "baseMetricV2" in impact:
-                        cvss_v2 = impact["baseMetricV2"].get("cvssV2", {})
-                        cvss_score = cvss_v2.get("baseScore")
-                        cvss_vector = cvss_v2.get("vectorString")
-                        vuln.cvss_score = cvss_score
-                        vuln.cve_vector = cvss_vector
-                        # Update metadata arrays
-                        if "cvss_score" in arr._metadata_raw:
-                            arr._metadata_raw["cvss_score"][idx] = cvss_score
-                        if "cve_vector" in arr._metadata_raw:
-                            arr._metadata_raw["cve_vector"][idx] = cvss_vector
-
-                    # Apply event P
-                    if apply_event:
-                        published_date = item.get("publishedDate")
-                        if published_date:
-                            try:
-                                dt = datetime.fromisoformat(published_date.replace("Z", "+00:00"))
-                                with contextlib.suppress(ValueError):
-                                    vuln.apply_event(CVDEvent.P, timestamp=dt)
-                            except (ValueError, TypeError):
-                                pass
-
-                    # Store metadata
-                    if import_metadata:
-                        metadata_dict = dict(item)
-
-                        # Apply include/exclude filters
-                        if include is not None:
-                            metadata_dict = {k: v for k, v in metadata_dict.items() if k in include}
-                        if exclude is not None:
-                            metadata_dict = {k: v for k, v in metadata_dict.items() if k not in exclude}
-
-                        if "nvd" not in vuln.metadata:
-                            vuln.metadata["nvd"] = {}
-                        vuln.metadata["nvd"].update(metadata_dict)
-            else:
-                # Create new vulnerability
-                vuln = CVDIO._create_vuln_from_nvd_item(cve_id, item)
-
-                # Store metadata if requested
-                if import_metadata:
-                    metadata_dict = dict(item)
-
-                    # Apply include/exclude filters
-                    if include is not None:
-                        metadata_dict = {k: v for k, v in metadata_dict.items() if k in include}
-                    if exclude is not None:
-                        metadata_dict = {k: v for k, v in metadata_dict.items() if k not in exclude}
-
-                    if "nvd" not in vuln.metadata:
-                        vuln.metadata["nvd"] = {}
-                    vuln.metadata["nvd"].update(metadata_dict)
-
-                new_vulns.append(vuln)
-
-        # Add new vulnerabilities to array or sync if only updates
-        if new_vulns:
-            # Rebuild array with existing + new vulnerabilities
-            all_vulns = list(arr._vulnerabilities) + new_vulns
-            arr._from_list(all_vulns)
-        else:
-            # No new vulns, but existing ones may have been updated
-            # Sync to update metadata arrays
-            arr.sync()
+        return NVDParser.import_nvd(arr, source, apply_event, import_metadata, include, exclude, skip_existing)
 
     @staticmethod
-    def from_nvd(nvd_items: list[dict[str, Any]]) -> "CVDArray":
-        """Create CVDArray from NVD CVE items (NVD JSON 2.0 format).
+    def import_nvd_glob(
+        arr: "CVDArray",
+        pattern: str,
+        apply_event: bool = True,
+        import_metadata: bool = False,
+        include: Optional[list[str]] = None,
+        exclude: Optional[list[str]] = None,
+        skip_existing: bool = True,
+    ) -> int:
+        """Import NVD data from glob pattern (delegates to NVDParser)."""
+        from .parsers import NVDParser
 
-        Args:
-            nvd_items: List of CVE items from NVD JSON feed
-
-        Returns:
-            CVDArray with vulnerabilities populated from NVD data
-
-        Example:
-            >>> with open("nvdcve-1.1-2024.json") as f:
-            ...     data = json.load(f)
-            >>> arr = CVDIO.from_nvd(data["CVE_Items"])
-        """
-        from .array import CVDArray
-
-        vulns = []
-        for item in nvd_items:
-            # Extract CVE ID
-            cve_id = item.get("cve", {}).get("CVE_data_meta", {}).get("ID")
-            if not cve_id:
-                continue
-
-            # Create vulnerability
-            vuln = CVDIO._create_vuln_from_nvd_item(cve_id, item)
-            vulns.append(vuln)
-
-        return CVDArray(vulns)
+        return NVDParser.import_nvd_glob(arr, pattern, apply_event, import_metadata, include, exclude, skip_existing)
 
     @staticmethod
-    def _create_vuln_from_nvd_item(cve_id: str, item: dict[str, Any]) -> "CVDVulnerability":
-        """Create a CVDVulnerability from an NVD item."""
-        from .vulnerability import CVDVulnerability
+    def from_nvd(nvd_items: list[dict[str, Any]], format_version: str = "1.1") -> "CVDArray":
+        """Create array from NVD file (delegates to NVDParser)."""
+        from .parsers import NVDParser
 
-        vuln = CVDVulnerability(cve_id)
-
-        # Extract CVSS score
-        impact = item.get("impact", {})
-        if "baseMetricV3" in impact:
-            cvss_v3 = impact["baseMetricV3"].get("cvssV3", {})
-            vuln.cvss_score = cvss_v3.get("baseScore")
-            vuln.cve_vector = cvss_v3.get("vectorString")
-        elif "baseMetricV2" in impact:
-            cvss_v2 = impact["baseMetricV2"].get("cvssV2", {})
-            vuln.cvss_score = cvss_v2.get("baseScore")
-            vuln.cve_vector = cvss_v2.get("vectorString")
-
-        # Extract published date as P event
-        published_date = item.get("publishedDate")
-        if published_date:
-            try:
-                # NVD format: "2024-01-15T12:00:00Z"
-                dt = datetime.fromisoformat(published_date.replace("Z", "+00:00"))
-                vuln.apply_event(CVDEvent.P, timestamp=dt)
-            except (ValueError, TypeError):
-                pass
-
-        return vuln
+        return NVDParser.from_nvd(nvd_items, format_version)
 
     @staticmethod
     def to_dataframe(
@@ -654,72 +509,79 @@ class CVDIO:
         """
         import pandas as pd
 
-        # Get base dicts
-        dicts = CVDIO.array_to_dicts(arr)
+        # Start with base data from dict conversion
+        dicts = CVDIO.array_to_dicts(arr, include_computed=False)
+        df = pd.DataFrame(dicts)
 
-        # Enhance with analytics
+        # Flatten event_timestamps into separate columns
+        if "event_timestamps" in df.columns:
+            # Extract event timestamps as separate columns
+            event_ts_df = pd.json_normalize(df["event_timestamps"])
+            # Rename columns to add _timestamp suffix
+            event_ts_df.columns = [f"{col}_timestamp" for col in event_ts_df.columns]
+            # Drop the nested event_timestamps column
+            df = df.drop(columns=["event_timestamps"])
+            # Concatenate the flattened event timestamps
+            df = pd.concat([df, event_ts_df], axis=1)
+
+        # Drop the nested history column (not useful in DataFrame format)
+        if "history" in df.columns:
+            df = df.drop(columns=["history"])
+
+        # Add analytics if requested
         if include_analytics:
-            for i, vuln_dict in enumerate(dicts):
-                vuln_dict["is_fix_available"] = arr.is_fix_available[i]
-                vuln_dict["is_fix_deployed"] = arr.is_fix_deployed[i]
-                vuln_dict["has_public_exploit"] = arr.has_public_exploit[i]
-                vuln_dict["is_under_attack"] = arr.is_under_attack[i]
-                vuln_dict["premature_disclosure"] = arr.premature_disclosure[i]
-                vuln_dict["disclosure_window_days"] = arr.disclosure_window_days[i]
-                vuln_dict["fix_lag_days"] = arr.fix_lag_days[i]
-                vuln_dict["deployment_lag_days"] = arr.deployment_lag_days[i]
+            for i in range(len(arr)):
+                df.loc[i, "is_fix_available"] = arr.is_fix_available[i]
+                df.loc[i, "is_fix_deployed"] = arr.is_fix_deployed[i]
+                df.loc[i, "has_public_exploit"] = arr.has_public_exploit[i]
+                df.loc[i, "is_under_attack"] = arr.is_under_attack[i]
+                df.loc[i, "premature_disclosure"] = arr.premature_disclosure[i]
+                df.loc[i, "disclosure_window_days"] = arr.disclosure_window_days[i]
+                df.loc[i, "fix_lag_days"] = arr.fix_lag_days[i]
+                df.loc[i, "deployment_lag_days"] = arr.deployment_lag_days[i]
 
-        # Explode metadata
-        if explode_metadata:
-            for i, vuln_dict in enumerate(dicts):
-                vuln = arr.get(i)
-                for namespace, meta_dict in vuln.metadata.items():
-                    if isinstance(meta_dict, dict):
-                        for key, value in meta_dict.items():
-                            vuln_dict[f"{namespace}_{key}"] = value
-
-        # Explode CVSS vector
+        # Explode CVSS vectors if requested
         if explode_cvss:
-            from .formatting import CVSSFormatter
+            # TODO: Explode CVSS vectors
+            pass
 
-            for vuln_dict in dicts:
-                if vuln_dict.get("cve_vector"):
-                    cvss_dict = CVSSFormatter.parse_vector(vuln_dict["cve_vector"])
-                    for key, value in cvss_dict.items():
-                        vuln_dict[f"cvss_{key}"] = value
+        # Explode metadata if requested
+        if explode_metadata and "metadata" in df.columns:
+            metadata_rows = []
+            for metadata_dict in df["metadata"]:
+                flat_dict = {}
+                if isinstance(metadata_dict, dict):
+                    for namespace, value in metadata_dict.items():
+                        if isinstance(value, dict):
+                            # Nested metadata: namespace_key pattern
+                            for key, val in value.items():
+                                flat_dict[f"{namespace}_{key}"] = val
+                        else:
+                            # Top-level metadata: just use the key
+                            flat_dict[namespace] = value
+                metadata_rows.append(flat_dict)
 
-        return pd.DataFrame(dicts)
+            if metadata_rows:
+                metadata_df = pd.DataFrame(metadata_rows)
+                # Drop the nested metadata column
+                df = df.drop(columns=["metadata"])
+                # Concatenate the flattened metadata
+                df = pd.concat([df, metadata_df], axis=1)
+
+        return df
 
     @staticmethod
-    def array_to_dicts(arr: "CVDArray") -> list[dict[str, Any]]:
-        """Convert array to list of dicts."""
-        dicts = []
+    def array_to_dicts(arr: "CVDArray", include_computed: bool = False) -> list[dict[str, Any]]:
+        """Convert array to list of dictionaries.
 
-        if arr._vulnerabilities is not None and len(arr._vulnerabilities) > 0:
-            for i in range(len(arr)):
-                vuln = arr.get(i)
+        Args:
+            arr: CVDArray instance
+            include_computed: Include computed properties
 
-                # Basic fields
-                vuln_dict = {
-                    "vuln_id": vuln.identity.vuln_id,
-                    "state": vuln.event_data.state,
-                    "cvss_score": vuln.cvss_score,
-                    "cve_vector": vuln.cve_vector,
-                    "vendor": vuln.vendor,
-                    "product": vuln.product,
-                    "severity": vuln.severity,
-                    "epss": vuln.epss,
-                    "is_kev": vuln.is_kev,
-                }
-
-                # Event timestamps
-                for event in CVDEvent:
-                    ts = vuln.event_data.events.get(event)
-                    vuln_dict[event.name] = ts
-
-                dicts.append(vuln_dict)
-
-        return dicts
+        Returns:
+            List of vulnerability dictionaries
+        """
+        return [CVDIO.to_dict(vuln, include_computed=include_computed) for vuln in arr]
 
     @staticmethod
     def to_json_file(arr: "CVDArray", filepath: str, include_computed: bool = False) -> None:
@@ -751,3 +613,194 @@ class CVDIO:
         """Load array from pickle file (fast)."""
         with open(filepath, "rb") as f:
             return pickle.load(f)
+
+    # Single vulnerability serialization
+    @staticmethod
+    def to_dict(vuln: "CVDVulnerability", include_computed: bool = False) -> dict[str, Any]:
+        """Convert vulnerability to dictionary.
+
+        Args:
+            vuln: CVDVulnerability instance
+            include_computed: If True, include computed properties
+
+        Returns:
+            Dictionary with all vulnerability data
+        """
+        data: dict[str, Any] = {
+            "cve_id": vuln.cve_id,
+            "vuln_id": vuln.vuln_id,
+            "state": vuln.state,
+            "metadata": dict(vuln.metadata) if vuln.metadata else {},
+            "cvss_score": vuln.cvss_score,
+            "epss": vuln.epss,
+            "cve_vector": vuln.cve_vector,
+            "is_kev": vuln.is_kev,
+            "event_timestamps": {
+                event.name: (
+                    None
+                    if timestamp is None
+                    else (
+                        timestamp.isoformat() if hasattr(timestamp, "isoformat") else str(timestamp)
+                    )
+                )
+                for event, timestamp in vuln.events.items()
+            },
+            "history": [
+                {
+                    "event": entry["event"].name if entry["event"] is not None else None,
+                    "from_state": entry["from_state"],
+                    "to_state": entry["to_state"],
+                    "timestamp": (
+                        entry["timestamp"].isoformat()
+                        if entry["timestamp"] and hasattr(entry["timestamp"], "isoformat")
+                        else str(entry["timestamp"]) if entry["timestamp"] else None
+                    ),
+                    "actor": entry.get("actor"),
+                    "notes": entry.get("notes"),
+                }
+                for entry in vuln.history
+            ],
+        }
+
+        if include_computed:
+            data["state_label"] = vuln.state_label
+            data["history_string"] = vuln.history_string
+
+        return data
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "CVDVulnerability":
+        """Reconstruct vulnerability from dictionary.
+
+        Args:
+            data: Dictionary from to_dict()
+
+        Returns:
+            CVDVulnerability instance
+        """
+        from datetime import datetime
+
+        from .constants import CVDEvent, string_to_state_int
+        from .models import (
+            VulnerabilityEnrichmentData,
+            VulnerabilityEventData,
+            VulnerabilityIdentity,
+            VulnerabilityScoringData,
+        )
+        from .vulnerability import CVDVulnerability
+
+        vuln_id = data.get("vuln_id") or data.get("internal_id")
+
+        def parse_timestamp(ts_str: Optional[str]) -> Optional[datetime]:
+            # Handle None, "TIMESTAMP_UNKNOWN" (legacy), or missing timestamps
+            if ts_str is None or ts_str == "TIMESTAMP_UNKNOWN":
+                return None  # TIMESTAMP_UNKNOWN
+            return datetime.fromisoformat(ts_str)
+
+        events = {
+            CVDEvent[event_name]: parse_timestamp(timestamp_str)
+            for event_name, timestamp_str in data.get("event_timestamps", {}).items()
+        }
+
+        history = [
+            {
+                "event": CVDEvent[entry["event"]] if entry["event"] is not None else None,
+                "from_state": entry["from_state"],
+                "to_state": entry["to_state"],
+                "timestamp": (
+                    datetime.fromisoformat(entry["timestamp"])
+                    if entry["timestamp"]
+                    else None  # TIMESTAMP_UNKNOWN
+                ),
+                "actor": entry.get("actor"),
+                "notes": entry.get("notes"),
+            }
+            for entry in data.get("history", [])
+        ]
+
+        vuln = CVDVulnerability.__new__(CVDVulnerability)
+        # Ensure vuln_id is a string (use cve_id as fallback)
+        final_vuln_id = vuln_id or data.get("cve_id") or ""
+        vuln.identity = VulnerabilityIdentity(vuln_id=str(final_vuln_id), cve_id=data.get("cve_id"))
+        vuln.scoring = VulnerabilityScoringData(
+            cvss_base_score=data.get("cvss_score"), cve_vector=data.get("cve_vector")
+        )
+        vuln.enrichment = VulnerabilityEnrichmentData(
+            epss=data.get("epss"), is_kev=data.get("is_kev", False)
+        )
+        vuln.event_data = VulnerabilityEventData(
+            state_encoded=string_to_state_int(data.get("state", "vfdpxa")),
+            events=events,
+            history=history,
+        )
+        vuln.metadata = data.get("metadata", {})
+
+        return vuln
+
+    @staticmethod
+    def to_json(vuln: "CVDVulnerability", indent: int = 2, include_computed: bool = False) -> str:
+        """Convert to JSON string.
+
+        Args:
+            vuln: CVDVulnerability instance
+            indent: JSON indentation level
+            include_computed: Include computed properties
+
+        Returns:
+            JSON string
+        """
+        data = CVDIO.to_dict(vuln, include_computed=include_computed)
+        return json.dumps(data, indent=indent, default=str)
+
+    @staticmethod
+    def from_json(json_str: str) -> "CVDVulnerability":
+        """Reconstruct from JSON string.
+
+        Args:
+            json_str: JSON string from to_json()
+
+        Returns:
+            CVDVulnerability instance
+        """
+        return CVDIO.from_dict(json.loads(json_str))
+
+    @staticmethod
+    def save_json(vuln: "CVDVulnerability", filepath: str, include_computed: bool = False) -> None:
+        """Save vulnerability to JSON file.
+
+        Args:
+            vuln: CVDVulnerability instance
+            filepath: Path to .json file
+            include_computed: Include computed properties
+        """
+        with open(filepath, "w") as f:
+            f.write(CVDIO.to_json(vuln, include_computed=include_computed))
+
+    @staticmethod
+    def load_json(filepath: str) -> "CVDVulnerability":
+        """Load vulnerability from JSON file.
+
+        Args:
+            filepath: Path to .json file
+
+        Returns:
+            CVDVulnerability instance
+        """
+        with open(filepath) as f:
+            return CVDIO.from_json(f.read())
+
+    @staticmethod
+    def array_from_dicts(data: list[dict[str, Any]], include_computed: bool = False) -> "CVDArray":
+        """Convert array to list of dictionaries.
+
+        Args:
+            data: List of dictionaries from to_dict()
+            include_computed: Include computed properties
+
+        Returns:
+            CVDArray instance
+        """
+        from .array import CVDArray
+
+        vulns = [CVDIO.from_dict(d) for d in data]
+        return CVDArray(vulns)
