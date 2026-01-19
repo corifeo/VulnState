@@ -1095,24 +1095,34 @@ class CVDArray:
         vulns = [CVDVulnerability.from_dict(data) for data in data_list]
         return cls(vulns)
 
-    @classmethod
-    def from_nvd(cls, cve_items: list[dict[str, Any]]) -> "CVDArray":
+    def import_nvd(
+        self,
+        source: Union[str, list[dict[str, Any]]],
+        apply_event: bool = True,
+        import_metadata: bool = False,
+        include: Optional[list[str]] = None,
+        exclude: Optional[list[str]] = None,
+        skip_existing: bool = False,
+    ) -> None:
         """
-        Create CVDArray from NVD JSON feed.
+        Import NVD vulnerability data.
 
         Args:
-            cve_items: List of CVE items from NVD feed
-
-        Returns:
-            CVDArray with vulnerabilities from NVD data
+            source: Path to NVD JSON file or list of CVE items
+            apply_event: Apply event P (Public) from publishedDate (default: True)
+            import_metadata: Store full NVD record in metadata['nvd'] (default: False)
+            include: Only import these metadata fields
+            exclude: Skip these metadata fields
+            skip_existing: Skip CVEs already in array (default: False)
 
         Example:
+            >>> arr = CVDArray()
             >>> with open("nvdcve-1.1-2024.json") as f:
             ...     data = json.load(f)
-            >>> arr = CVDArray.from_nvd(data["CVE_Items"])
+            >>> arr.import_nvd(data["CVE_Items"])
         """
         from vulnstate.io import CVDIO
-        return CVDIO.from_nvd(cve_items)
+        CVDIO.import_nvd(self, source, apply_event, import_metadata, include, exclude, skip_existing)
 
     def save_pickle_batch(self, filepath: str) -> None:
         """
@@ -1361,46 +1371,6 @@ class CVDArray:
             include,
             exclude,
         )
-
-    def import_nvd_file(self, filepath: str) -> None:
-        """
-        Import NVD data from JSON file (convenience wrapper).
-
-        Parses NVD Feed 1.1 format and delegates to CVDIO.import_nvdcve().
-
-        Args:
-            filepath: Path to NVD JSON file
-
-        Example:
-            >>> arr.import_nvd_file('data/nvdcve-1.1-2024.json')
-        """
-        import json
-        from typing import Any
-
-        from .io import CVDIO
-
-        with open(filepath) as f:
-            nvd_feed = json.load(f)
-
-        nvd_data: dict[str, dict[str, Any]] = {}
-        for item in nvd_feed.get("CVE_Items", []):
-            cve_id = item["cve"]["CVE_data_meta"]["ID"]
-            nvd_info: dict[str, Any] = {}
-
-            impact = item.get("impact", {})
-            if "baseMetricV3" in impact:
-                cvss_v3 = impact["baseMetricV3"]["cvssV3"]
-                nvd_info["cvss_score"] = cvss_v3["baseScore"]
-                nvd_info["cve_vector"] = cvss_v3.get("vectorString", "")
-            elif "baseMetricV2" in impact:
-                cvss_v2 = impact["baseMetricV2"]["cvssV2"]
-                nvd_info["cvss_score"] = cvss_v2["baseScore"]
-                nvd_info["cve_vector"] = cvss_v2.get("vectorString", "")
-
-            if nvd_info:
-                nvd_data[cve_id] = nvd_info
-
-        CVDIO.import_nvdcve(self, nvd_data)
 
     # ==================== FACTORY METHODS ====================
 

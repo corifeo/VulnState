@@ -755,7 +755,7 @@ class TestNVDFileImport:
 
         # Import NVD data from file
         nvd_file = os.path.join(DATA_DIR, "nvd_sample.json")
-        arr.import_nvd_file(nvd_file)
+        arr.import_nvd(nvd_file)
 
         # Verify CVSS scores were imported
         assert arr[0].cvss_score == 6.1  # CVE-2024-001
@@ -771,7 +771,7 @@ class TestNVDFileImport:
         arr = CVDArray(vulns)
 
         nvd_file = os.path.join(DATA_DIR, "nvd_sample.json")
-        arr.import_nvd_file(nvd_file)
+        arr.import_nvd(nvd_file)
 
         # Verify vector strings were imported
         assert "CVSS:3.1" in arr[0].cve_vector
@@ -783,7 +783,7 @@ class TestNVDFileImport:
         arr = CVDArray(vulns)
 
         nvd_file = os.path.join(DATA_DIR, "nvd_sample.json")
-        arr.import_nvd_file(nvd_file)
+        arr.import_nvd(nvd_file)
 
         # Verify v2 score was used
         assert arr[0].cvss_score == 7.5
@@ -799,7 +799,7 @@ class TestNVDFileImport:
 
         # Use convenience method
         nvd_file = os.path.join(DATA_DIR, "nvd_sample.json")
-        arr.import_nvd_file(nvd_file)
+        arr.import_nvd(nvd_file)
 
         assert arr[0].cvss_score == 6.1
         assert arr[1].cvss_score == 9.8
@@ -825,7 +825,7 @@ class TestIntegratedWorkflow:
 
         arr.import_epss(epss_file)
         arr.import_kev(kev_file)
-        arr.import_nvd_file(nvd_file)
+        arr.import_nvd(nvd_file)
 
         # Verify CVE-2024-001 has all three enrichments
         assert arr[0].epss == pytest.approx(0.85432)
