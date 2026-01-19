@@ -876,7 +876,7 @@ class TestFileImportErrorHandling:
         arr = CVDArray(vulns)
 
         with pytest.raises(json.JSONDecodeError):
-            arr.import_nvd_file(str(malformed))
+            arr.import_nvd(str(malformed))
 
 
 class TestMetadataPluck:
