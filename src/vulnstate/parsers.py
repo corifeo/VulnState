@@ -271,6 +271,28 @@ class NVDParser:
             else:
                 format_version = "1.1"
 
+        # For fixed-size arrays, check capacity before processing
+        if hasattr(arr, '_fixed_size') and arr._fixed_size:
+            capacity = len(arr)
+
+            # Count new items (not already in array)
+            existing_cve_ids: set[str] = set()
+            if "_cve_id" in arr._metadata_raw:
+                existing_cve_ids = {str(cve_id) for cve_id in arr._metadata_raw["_cve_id"]}
+
+            new_items = []
+            for item in nvd_items:
+                cve_id = NVDParser.extract_cve_id(item, format_version)
+                if cve_id and cve_id not in existing_cve_ids:
+                    new_items.append(item)
+
+            if len(new_items) > capacity:
+                raise ValueError(
+                    f"Import exceeds fixed-size array capacity: "
+                    f"array capacity={capacity}, new items={len(new_items)}. "
+                    f"Use CVDArray() for dynamic arrays or CVDArray.from_nvd() to create from data."
+                )
+
         # If array is empty, treat all items as new
         if len(arr) == 0:
             new_vulns = []

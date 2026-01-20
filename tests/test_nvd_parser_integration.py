@@ -44,7 +44,7 @@ class TestCompleteWorkflow:
         }
 
         # Import
-        arr = CVDArray.zeros(0)
+        arr = CVDArray()
         NVDParser.import_nvd(arr, nvd_11_data["CVE_Items"])
 
         # Verify
@@ -95,7 +95,7 @@ class TestCompleteWorkflow:
         }
 
         # Import
-        arr = CVDArray.zeros(0)
+        arr = CVDArray()
         NVDParser.import_nvd(arr, nvd_20_data["vulnerabilities"])
 
         # Verify
@@ -135,7 +135,7 @@ class TestCompleteWorkflow:
 
         try:
             # Import from file
-            arr = CVDArray.zeros(0)
+            arr = CVDArray()
             arr.import_nvd(temp_path)
 
             assert len(arr) == 1
@@ -173,7 +173,7 @@ class TestCompleteWorkflow:
                 json.dump(nvd_2, f)
 
             # Import using glob
-            arr = CVDArray.zeros(0)
+            arr = CVDArray()
             pattern = str(Path(tmpdir) / "nvdcve-*.json")
             count = arr.import_nvd_glob(pattern)
 
@@ -187,7 +187,7 @@ class TestCompleteWorkflow:
         from vulnstate.io import CVDIO
 
         # Old way (via CVDIO) should still work
-        arr = CVDArray.zeros(0)
+        arr = CVDArray()
         nvd_items = [{"cve": {"id": "CVE-2023-COMPAT", "metrics": {}}}]
 
         CVDIO.import_nvd(arr, nvd_items)
@@ -198,7 +198,7 @@ class TestCompleteWorkflow:
     def test_backward_compatibility_array(self):
         """Verify CVDArray method maintains backward compatibility."""
         # New way (via array method) should work
-        arr = CVDArray.zeros(0)
+        arr = CVDArray()
         nvd_items = [{"cve": {"id": "CVE-2023-ARRAY", "metrics": {}}}]
 
         arr.import_nvd(nvd_items)
@@ -209,7 +209,7 @@ class TestCompleteWorkflow:
     def test_direct_parser_usage(self):
         """Verify direct NVDParser usage works."""
         # Direct parser usage (new way)
-        arr = CVDArray.zeros(0)
+        arr = CVDArray()
         nvd_items = [{"cve": {"id": "CVE-2023-DIRECT", "metrics": {}}}]
 
         NVDParser.import_nvd(arr, nvd_items)

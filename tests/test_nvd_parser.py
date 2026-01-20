@@ -235,7 +235,7 @@ class TestBackwardCompatibility:
 
     def test_import_nvd_via_cvdio(self):
         """Ensure CVDIO.import_nvd() delegates to NVDParser."""
-        arr = CVDArray.zeros(0)
+        arr = CVDArray()
         nvd_items = [
             {
                 "cve": {
@@ -258,7 +258,7 @@ class TestBackwardCompatibility:
 
     def test_import_nvd_via_array(self):
         """Ensure CVDArray.import_nvd() works."""
-        arr = CVDArray.zeros(0)
+        arr = CVDArray()
         nvd_items = [
             {
                 "cve": {
@@ -295,7 +295,7 @@ class TestIntegration:
 
     def test_import_mixed_cvss_versions(self):
         """Handle items with different CVSS versions."""
-        arr = CVDArray.zeros(0)
+        arr = CVDArray()
         nvd_items = [
             # Has v3.1
             {
@@ -341,7 +341,7 @@ class TestIntegration:
 
     def test_import_with_metadata(self):
         """Import NVD data with metadata storage."""
-        arr = CVDArray.zeros(0)
+        arr = CVDArray()
         nvd_items = [
             {
                 "cve": {
@@ -360,7 +360,7 @@ class TestIntegration:
 
     def test_update_existing_vulnerability(self):
         """Update existing vulnerability with new NVD data."""
-        arr = CVDArray.zeros(0)
+        arr = CVDArray()
 
         # Initial import without CVSS
         nvd_items_v1 = [{"cve": {"id": "CVE-2023-0001", "metrics": {}}}]
@@ -424,7 +424,7 @@ class TestRegressionScenarios:
 
     def test_empty_array_optimization(self):
         """Verify empty array optimization path."""
-        arr = CVDArray.zeros(0)
+        arr = CVDArray()
         nvd_items = [
             {"cve": {"id": "CVE-2023-0001", "metrics": {}}},
             {"cve": {"id": "CVE-2023-0002", "metrics": {}}},

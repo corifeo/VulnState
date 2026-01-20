@@ -64,12 +64,24 @@ class CVDArray:
 
     # ==================== INITIALIZATION ====================
 
-    def __init__(self, vulnerabilities: Optional[list[CVDVulnerability]] = None):
+    def __init__(self, vulnerabilities: Optional[list[CVDVulnerability]] = None,
+                 fixed_size: bool = False):
         """
         Initialize array from list of vulnerabilities or create empty.
 
         Args:
             vulnerabilities: List of CVDVulnerability objects, or None for empty array
+            fixed_size: If True, array has fixed capacity and cannot grow via imports.
+                       Use False (default) for dynamic arrays that grow automatically.
+
+        Examples:
+            Dynamic array (grows automatically):
+            >>> arr = CVDArray()
+            >>> arr.import_nvd('data.json')  # Array grows to fit data
+
+            Fixed-size array (strict capacity):
+            >>> arr = CVDArray.zeros(100)  # Pre-allocated 100 slots
+            >>> arr.import_nvd('data.json')  # ValueError if >100 items
         """
         # Data components (dataclasses)
         self.core = ArrayCoreData()
@@ -86,6 +98,9 @@ class CVDArray:
         # Analysis cache (computed on first access)
         self._analysis_cache: Optional[AnalysisResult] = None
 
+        # Fixed-size semantics
+        self._fixed_size = fixed_size
+
         if vulnerabilities:
             self._from_list(vulnerabilities)
         else:
@@ -99,6 +114,9 @@ class CVDArray:
 
     def _from_list(self, vulnerabilities: list[CVDVulnerability]) -> None:
         """Build arrays from list of vulnerabilities."""
+        # Store current fixed_size flag (preserve during rebuilds)
+        was_fixed = getattr(self, '_fixed_size', False)
+
         n = len(vulnerabilities)
 
         # Core data
@@ -193,6 +211,9 @@ class CVDArray:
                 except (ValueError, TypeError):
                     self._metadata_data.raw[key] = np.array(values, dtype=object)
 
+        # Restore fixed_size flag (preserve during rebuilds)
+        self._fixed_size = was_fixed
+
     # ==================== REPRESENTATION ====================
 
     def __len__(self) -> int:
@@ -207,6 +228,26 @@ class CVDArray:
     def __str__(self) -> str:
         """User-friendly string (shows summary)."""
         return self.summary
+
+    @property
+    def is_fixed_size(self) -> bool:
+        """
+        Check if array has fixed-size semantics.
+
+        Returns:
+            True if array was created with zeros()/ones()/random() and cannot grow.
+            False if array is dynamic and can grow via imports.
+
+        Examples:
+            >>> arr = CVDArray.zeros(100)
+            >>> arr.is_fixed_size
+            True
+
+            >>> arr = CVDArray()
+            >>> arr.is_fixed_size
+            False
+        """
+        return getattr(self, '_fixed_size', False)
 
     # ==================== DATACLASS PROPERTY ACCESSORS ====================
 
@@ -1410,21 +1451,26 @@ class CVDArray:
     @classmethod
     def zeros(cls, n: int, vuln_id_prefix: Optional[str] = None) -> "CVDArray":
         """
-        Create array of n vulnerabilities in initial state (vfdpxa).
+        Create fixed-size array of n vulnerabilities in initial state (vfdpxa).
 
         All vulnerabilities start in the initial 'vfdpxa' state with no events applied.
+        Fixed-size arrays have strict capacity limits - attempting to import more items
+        than capacity raises ValueError. Use CVDArray() for dynamic growth.
 
         Args:
-            n: Number of vulnerabilities to create
+            n: Number of vulnerabilities to create (fixed capacity)
             vuln_id_prefix: Optional prefix for auto-generated CVE IDs (e.g., 'ZERO')
                 If provided, creates IDs like ZERO-00000, ZERO-00001, etc.
 
         Returns:
-            CVDArray with n vulnerabilities in vfdpxa state
+            Fixed-size CVDArray with n vulnerabilities in vfdpxa state
 
         Example:
             >>> arr = CVDArray.zeros(100)  # 100 initial vulnerabilities
-            >>> arr = CVDArray.zeros(50, vuln_id_prefix='INIT')  # INIT-00000, INIT-00001, ...
+            >>> arr.is_fixed_size
+            True
+            >>> len(arr)
+            100
         """
         vulns = []
         for i in range(n):
@@ -1432,27 +1478,30 @@ class CVDArray:
             # Create with no awareness flags (defaults to initial state vfdpxa)
             vuln = CVDVulnerability(cve_id=cve_id)
             vulns.append(vuln)
-        return cls(vulns)
+        return cls(vulns, fixed_size=True)
 
     @classmethod
     def ones(cls, n: int, vuln_id_prefix: Optional[str] = None) -> "CVDArray":
         """
-        Create array of n vulnerabilities in terminal state (VFDPXA).
+        Create fixed-size array of n vulnerabilities in terminal state (VFDPXA).
 
         All vulnerabilities start with all events announced (VFDPXA state).
         This is useful for testing and scenarios where all phases are complete.
+        Fixed-size arrays have strict capacity limits - attempting to import more items
+        than capacity raises ValueError. Use CVDArray() for dynamic growth.
 
         Args:
-            n: Number of vulnerabilities to create
+            n: Number of vulnerabilities to create (fixed capacity)
             vuln_id_prefix: Optional prefix for auto-generated CVE IDs (e.g., 'TERM')
                 If provided, creates IDs like TERM-00000, TERM-00001, etc.
 
         Returns:
-            CVDArray with n vulnerabilities in VFDPXA state
+            Fixed-size CVDArray with n vulnerabilities in VFDPXA state
 
         Example:
             >>> arr = CVDArray.ones(100)  # 100 terminal state vulnerabilities
-            >>> arr = CVDArray.ones(50, vuln_id_prefix='END')  # END-00000, END-00001, ...
+            >>> arr.is_fixed_size
+            True
         """
         vulns = []
         for i in range(n):
@@ -1469,30 +1518,33 @@ class CVDArray:
                 create_timestamps=False,
             )
             vulns.append(vuln)
-        return cls(vulns)
+        return cls(vulns, fixed_size=True)
 
     @classmethod
     def random(
         cls, n: int, vuln_id_prefix: Optional[str] = None, seed: Optional[int] = None
     ) -> "CVDArray":
         """
-        Create array of n vulnerabilities with random valid states.
+        Create fixed-size array of n vulnerabilities with random valid states.
 
         Each vulnerability is assigned a random valid state from the 32 possible CVD states.
         Useful for testing and simulations.
+        Fixed-size arrays have strict capacity limits - attempting to import more items
+        than capacity raises ValueError. Use CVDArray() for dynamic growth.
 
         Args:
-            n: Number of vulnerabilities to create
+            n: Number of vulnerabilities to create (fixed capacity)
             vuln_id_prefix: Optional prefix for auto-generated CVE IDs (e.g., 'RAND')
                 If provided, creates IDs like RAND-00000, RAND-00001, etc.
             seed: Optional random seed for reproducibility
 
         Returns:
-            CVDArray with n vulnerabilities in random valid states
+            Fixed-size CVDArray with n vulnerabilities in random valid states
 
         Example:
             >>> arr = CVDArray.random(1000)  # 1000 random vulnerabilities
-            >>> arr = CVDArray.random(100, vuln_id_prefix='RND', seed=42)  # Reproducible random
+            >>> arr.is_fixed_size
+            True
         """
         if seed is not None:
             np.random.seed(seed)
@@ -1516,4 +1568,4 @@ class CVDArray:
                 create_timestamps=False,
             )
             vulns.append(vuln)
-        return cls(vulns)
+        return cls(vulns, fixed_size=True)

@@ -88,27 +88,46 @@ print(vuln.is_zero_day)  # True
 
 ### Data Import
 
+**Dynamic arrays** (grow as you import):
 ```python
 from vulnstate import CVDArray
 
-arr = CVDArray.zeros(100)
+# Start with empty array
+arr = CVDArray()
 
-# Import EPSS scores
-arr.import_epss('epss_scores.csv')
-
-# Import KEV list (applies event A automatically)
-arr.import_kev('known_exploited.csv')
-
-# Import from NVD JSON (supports both 1.1 and 2.0 formats)
+# Import NVD data - array grows to fit
 arr.import_nvd('nvdcve-1.1-2024.json')
+print(len(arr))  # Size depends on items in file
 
-# Import from multiple NVD files using glob pattern
+# Import more - continues growing
 count = arr.import_nvd_glob('nvdcve-*.json')
 print(f"Loaded from {count} files")
+```
 
-# Create array from NVD file directly
-from vulnstate.parsers import NVDParser
-arr = NVDParser.from_nvd([...])  # Pass NVD items
+**Fixed-size arrays** (pre-allocated, strict capacity):
+```python
+# Pre-allocate 1000 slots
+arr = CVDArray.zeros(1000)
+
+# Import up to 1000 items (updates existing slots)
+arr.import_nvd('nvdcve-1.1-2024.json')
+print(len(arr))  # Still 1000
+
+# Attempting to import more than capacity raises ValueError
+# arr.import_nvd('huge_file_with_2000_items.json')  # ❌ ValueError
+```
+
+**Enrichment** (EPSS, KEV - only updates existing):
+```python
+# Works on both fixed and dynamic arrays
+arr.import_epss('epss_scores.csv')  # Updates matching CVE IDs
+arr.import_kev('known_exploited.csv')  # Applies event A automatically
+```
+
+**Create directly from data**:
+```python
+# Best for large datasets - auto-sizes to fit data
+arr = CVDArray.from_nvd('nvdcve-1.1-2024.json')
 ```
 
 ## Architecture

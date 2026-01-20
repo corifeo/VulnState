@@ -862,5 +862,64 @@ class TestDesiderataMaskProperty:
         assert all(v <= 0x7FFF for v in arr.analysis.desiderata_mask)
 
 
+class TestFixedSizeSemantics:
+    """Test fixed-size vs dynamic array semantics."""
+
+    def test_zeros_creates_fixed_size_array(self):
+        """Verify zeros() creates fixed-size array."""
+        arr = CVDArray.zeros(100)
+        assert arr.is_fixed_size is True
+        assert len(arr) == 100
+
+    def test_ones_creates_fixed_size_array(self):
+        """Verify ones() creates fixed-size array."""
+        arr = CVDArray.ones(50)
+        assert arr.is_fixed_size is True
+        assert len(arr) == 50
+
+    def test_random_creates_fixed_size_array(self):
+        """Verify random() creates fixed-size array."""
+        arr = CVDArray.random(75, seed=42)
+        assert arr.is_fixed_size is True
+        assert len(arr) == 75
+
+    def test_default_constructor_creates_dynamic_array(self):
+        """Verify CVDArray() creates dynamic array."""
+        arr = CVDArray()
+        assert arr.is_fixed_size is False
+        assert len(arr) == 0
+
+    def test_constructor_with_list_creates_dynamic_array(self):
+        """Verify CVDArray([...]) creates dynamic array."""
+        vulns = [CVDVulnerability(f'CVE-{i}') for i in range(10)]
+        arr = CVDArray(vulns)
+        assert arr.is_fixed_size is False
+        assert len(arr) == 10
+
+    def test_fixed_size_flag_preserved_during_rebuild(self):
+        """Verify _fixed_size flag preserved when _from_list() rebuilds array."""
+        arr = CVDArray.zeros(100)
+        assert arr.is_fixed_size is True
+
+        # Trigger rebuild by directly calling _from_list
+        vulns = [CVDVulnerability(f'CVE-{i}') for i in range(50)]
+        arr._from_list(vulns)
+
+        # After rebuild, flag should still be True
+        assert arr.is_fixed_size is True
+
+    def test_dynamic_flag_preserved_during_rebuild(self):
+        """Verify dynamic flag preserved when _from_list() rebuilds array."""
+        arr = CVDArray()
+        assert arr.is_fixed_size is False
+
+        # Trigger rebuild by directly calling _from_list
+        vulns = [CVDVulnerability(f'CVE-{i}') for i in range(50)]
+        arr._from_list(vulns)
+
+        # After rebuild, flag should still be False
+        assert arr.is_fixed_size is False
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
