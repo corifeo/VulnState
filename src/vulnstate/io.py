@@ -73,8 +73,7 @@ class CVDIO:
 
             except ImportError:
                 raise ImportError(
-                    "URL support requires 'requests' package. "
-                    "Install with: pip install requests"
+                    "URL support requires 'requests' package. " "Install with: pip install requests"
                 ) from None
             except Exception as e:
                 raise ValueError(f"Failed to download from URL: {e}") from e
@@ -162,9 +161,7 @@ class CVDIO:
                     vuln.metadata["kev_date_added"] = kev_row["dateAdded"]
                     # Store in enrichment as datetime
                     with contextlib.suppress(ValueError, TypeError):
-                        vuln.enrichment.kev_date = datetime.fromisoformat(
-                            kev_row["dateAdded"]
-                        )
+                        vuln.enrichment.kev_date = datetime.fromisoformat(kev_row["dateAdded"])
 
                 # Apply event A
                 if apply_event and "dateAdded" in kev_row:
@@ -175,7 +172,6 @@ class CVDIO:
         else:
             # TODO: Handle expunged _vulnerabilities
             pass
-
 
     @staticmethod
     def import_epss(
@@ -204,7 +200,7 @@ class CVDIO:
             epss_data = {}
             with open(local_path, encoding="utf-8") as f:
                 # Skip comment lines (EPSS files start with #model_version...)
-                lines = [line for line in f if not line.startswith('#')]
+                lines = [line for line in f if not line.startswith("#")]
                 reader = csv.DictReader(lines)
                 for row in reader:
                     cve_id = row["cve"]
@@ -235,7 +231,9 @@ class CVDIO:
 
                 if import_metadata:
                     # Store full metadata
-                    metadata_dict = epss_value if isinstance(epss_value, dict) else {"epss": epss_value}
+                    metadata_dict = (
+                        epss_value if isinstance(epss_value, dict) else {"epss": epss_value}
+                    )
 
                     # Apply include/exclude filters
                     if include is not None:
@@ -471,7 +469,9 @@ class CVDIO:
         """Import NVD data (delegates to NVDParser)."""
         from .parsers import NVDParser
 
-        return NVDParser.import_nvd(arr, source, apply_event, import_metadata, include, exclude, skip_existing)
+        return NVDParser.import_nvd(
+            arr, source, apply_event, import_metadata, include, exclude, skip_existing
+        )
 
     @staticmethod
     def import_nvd_glob(
@@ -486,7 +486,9 @@ class CVDIO:
         """Import NVD data from glob pattern (delegates to NVDParser)."""
         from .parsers import NVDParser
 
-        return NVDParser.import_nvd_glob(arr, pattern, apply_event, import_metadata, include, exclude, skip_existing)
+        return NVDParser.import_nvd_glob(
+            arr, pattern, apply_event, import_metadata, include, exclude, skip_existing
+        )
 
     @staticmethod
     def from_nvd(nvd_items: list[dict[str, Any]], format_version: str = "1.1") -> "CVDArray":

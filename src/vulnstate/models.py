@@ -201,7 +201,9 @@ class ArrayScoring:
 
     # CVSS Scores
     cvss_score: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
-    cvss_exploitability_score: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
+    cvss_exploitability_score: np.ndarray = field(
+        default_factory=lambda: np.array([], dtype=np.float32)
+    )
     cvss_impact_score: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
 
     # CVSS 3.x Base Metrics (parsed from cve_vector)
@@ -718,7 +720,7 @@ def compute_pair_mask(cvd_state: ArrayCVDState) -> np.ndarray:
 
         # Set bit for vulnerabilities where pair is satisfied
         satisfied = both_occurred & correct_order
-        mask[satisfied] |= (1 << bit_pos)
+        mask[satisfied] |= 1 << bit_pos
 
     return mask
 
@@ -752,14 +754,16 @@ def compute_history_id(cvd_state: ArrayCVDState) -> np.ndarray:
     result = np.full(n, INCOMPLETE_HISTORY_ID, dtype=np.uint8)
 
     # Stack all timestamps: shape (N, 6)
-    timestamps = np.column_stack([
-        cvd_state.V_timestamps,
-        cvd_state.F_timestamps,
-        cvd_state.D_timestamps,
-        cvd_state.P_timestamps,
-        cvd_state.X_timestamps,
-        cvd_state.A_timestamps,
-    ])
+    timestamps = np.column_stack(
+        [
+            cvd_state.V_timestamps,
+            cvd_state.F_timestamps,
+            cvd_state.D_timestamps,
+            cvd_state.P_timestamps,
+            cvd_state.X_timestamps,
+            cvd_state.A_timestamps,
+        ]
+    )
 
     # Event labels for building history strings
     event_labels = ["V", "F", "D", "P", "X", "A"]

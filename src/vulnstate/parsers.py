@@ -213,8 +213,14 @@ class NVDParser:
             Values are single-letter codes or None if not present/parseable
         """
         result = {
-            'AV': None, 'AC': None, 'PR': None, 'UI': None,
-            'S': None, 'C': None, 'I': None, 'A': None
+            "AV": None,
+            "AC": None,
+            "PR": None,
+            "UI": None,
+            "S": None,
+            "C": None,
+            "I": None,
+            "A": None,
         }
 
         if not vector or not isinstance(vector, str):
@@ -222,10 +228,10 @@ class NVDParser:
 
         # Parse format: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
         try:
-            parts = vector.split('/')
+            parts = vector.split("/")
             for part in parts[1:]:  # Skip "CVSS:3.1"
-                if ':' in part:
-                    key, value = part.split(':', 1)
+                if ":" in part:
+                    key, value = part.split(":", 1)
                     if key in result:
                         result[key] = value
         except Exception:
@@ -347,10 +353,10 @@ class NVDParser:
 
         for cpe in cpe_strings:
             parsed = parse_cpe(cpe)
-            if parsed['vendor_id']:
-                vendors.add(parsed['vendor_id'])
-            if parsed['product_id']:
-                products.add(parsed['product_id'])
+            if parsed["vendor_id"]:
+                vendors.add(parsed["vendor_id"])
+            if parsed["product_id"]:
+                products.add(parsed["product_id"])
 
         return sorted(vendors), sorted(products)
 
@@ -383,7 +389,9 @@ class NVDParser:
             return item.get("lastModifiedDate")
 
     @staticmethod
-    def create_vuln_from_item(cve_id: str, item: dict[str, Any], format_version: str = "1.1") -> "CVDVulnerability":
+    def create_vuln_from_item(
+        cve_id: str, item: dict[str, Any], format_version: str = "1.1"
+    ) -> "CVDVulnerability":
         """
         Create a CVDVulnerability from an NVD item.
 
@@ -515,7 +523,7 @@ class NVDParser:
                 format_version = "1.1"
 
         # For fixed-size arrays, check capacity before processing
-        if hasattr(arr, '_fixed_size') and arr._fixed_size:
+        if hasattr(arr, "_fixed_size") and arr._fixed_size:
             capacity = len(arr)
 
             # Count new items (not already in array)
@@ -594,8 +602,8 @@ class NVDParser:
                     vuln = arr.get(idx)
 
                     # Update CVSS score, vector, and sub-scores
-                    cvss_score, cvss_vector, exploitability, impact = (
-                        NVDParser.extract_cvss(item, format_version)
+                    cvss_score, cvss_vector, exploitability, impact = NVDParser.extract_cvss(
+                        item, format_version
                     )
                     if cvss_score is not None:
                         vuln.cvss_score = cvss_score
@@ -627,7 +635,9 @@ class NVDParser:
                         if include is not None:
                             metadata_dict = {k: v for k, v in metadata_dict.items() if k in include}
                         if exclude is not None:
-                            metadata_dict = {k: v for k, v in metadata_dict.items() if k not in exclude}
+                            metadata_dict = {
+                                k: v for k, v in metadata_dict.items() if k not in exclude
+                            }
 
                         if "nvd" not in vuln.metadata:
                             vuln.metadata["nvd"] = {}
@@ -769,27 +779,27 @@ def parse_cpe(cpe_string: Optional[str]) -> dict[str, Optional[str]]:
         >>> parse_cpe(None)
         {'vendor_id': None, 'product_id': None}
     """
-    result: dict[str, Optional[str]] = {'vendor_id': None, 'product_id': None}
+    result: dict[str, Optional[str]] = {"vendor_id": None, "product_id": None}
 
     if not cpe_string or not isinstance(cpe_string, str):
         return result
 
     try:
         # CPE 2.3 format: cpe:2.3:part:vendor:product:version:...
-        parts = cpe_string.split(':')
+        parts = cpe_string.split(":")
 
         # Validate CPE 2.3 format
-        if len(parts) < 5 or parts[0] != 'cpe' or parts[1] != '2.3':
+        if len(parts) < 5 or parts[0] != "cpe" or parts[1] != "2.3":
             return result
 
         vendor = parts[3] if len(parts) > 3 else None
         product = parts[4] if len(parts) > 4 else None
 
         # Filter out wildcards and empty values
-        if vendor and vendor not in ('*', '-', ''):
-            result['vendor_id'] = vendor
-        if product and product not in ('*', '-', ''):
-            result['product_id'] = product
+        if vendor and vendor not in ("*", "-", ""):
+            result["vendor_id"] = vendor
+        if product and product not in ("*", "-", ""):
+            result["product_id"] = product
 
     except Exception:
         # Invalid format, return None values
@@ -814,12 +824,12 @@ def extract_cpe_from_configurations(configurations: list[dict[str, Any]]) -> Opt
         return None
 
     for config in configurations:
-        nodes = config.get('nodes', [])
+        nodes = config.get("nodes", [])
         for node in nodes:
-            cpe_matches = node.get('cpeMatch', [])
+            cpe_matches = node.get("cpeMatch", [])
             for match in cpe_matches:
-                criteria = match.get('criteria')
-                if criteria and criteria.startswith('cpe:2.3:'):
+                criteria = match.get("criteria")
+                if criteria and criteria.startswith("cpe:2.3:"):
                     return criteria
 
     return None

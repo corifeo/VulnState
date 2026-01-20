@@ -120,9 +120,7 @@ class TestCompleteWorkflow:
                     "cve": {
                         "id": "CVE-2023-TEST",
                         "metrics": {
-                            "cvssMetricV31": [
-                                {"type": "Primary", "cvssData": {"baseScore": 8.5}}
-                            ]
+                            "cvssMetricV31": [{"type": "Primary", "cvssData": {"baseScore": 8.5}}]
                         },
                     }
                 }
@@ -153,9 +151,7 @@ class TestCompleteWorkflow:
             # File 1
             nvd_1 = {
                 "version": "2.0",
-                "vulnerabilities": [
-                    {"cve": {"id": "CVE-2023-0001", "metrics": {}}}
-                ],
+                "vulnerabilities": [{"cve": {"id": "CVE-2023-0001", "metrics": {}}}],
             }
             file1 = Path(tmpdir) / "nvdcve-2.0-2023.json"
             with open(file1, "w") as f:
@@ -164,9 +160,7 @@ class TestCompleteWorkflow:
             # File 2
             nvd_2 = {
                 "version": "2.0",
-                "vulnerabilities": [
-                    {"cve": {"id": "CVE-2023-0002", "metrics": {}}}
-                ],
+                "vulnerabilities": [{"cve": {"id": "CVE-2023-0002", "metrics": {}}}],
             }
             file2 = Path(tmpdir) / "nvdcve-2.0-2024.json"
             with open(file2, "w") as f:

@@ -1,4 +1,5 @@
 """Tests for CVSS vector parsing."""
+
 from vulnstate.parsers import NVDParser
 
 
@@ -7,14 +8,14 @@ def test_parse_cvss_vector_valid():
     vector = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
     result = NVDParser.parse_cvss_vector(vector)
 
-    assert result['AV'] == 'N'
-    assert result['AC'] == 'L'
-    assert result['PR'] == 'N'
-    assert result['UI'] == 'N'
-    assert result['S'] == 'U'
-    assert result['C'] == 'H'
-    assert result['I'] == 'H'
-    assert result['A'] == 'H'
+    assert result["AV"] == "N"
+    assert result["AC"] == "L"
+    assert result["PR"] == "N"
+    assert result["UI"] == "N"
+    assert result["S"] == "U"
+    assert result["C"] == "H"
+    assert result["I"] == "H"
+    assert result["A"] == "H"
 
 
 def test_parse_cvss_vector_partial():
@@ -22,10 +23,10 @@ def test_parse_cvss_vector_partial():
     vector = "CVSS:3.1/AV:N/AC:L"
     result = NVDParser.parse_cvss_vector(vector)
 
-    assert result['AV'] == 'N'
-    assert result['AC'] == 'L'
-    assert result['PR'] is None
-    assert result['UI'] is None
+    assert result["AV"] == "N"
+    assert result["AC"] == "L"
+    assert result["PR"] is None
+    assert result["UI"] is None
 
 
 def test_parse_cvss_vector_none():

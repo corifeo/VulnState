@@ -35,6 +35,7 @@ class TestVulnerabilityIdentity:
         assert len(identity.vuln_id) == 36  # UUID format
         assert identity.cve_id == "CVE-2024-1234"
 
+
 class TestArrayTimestamps:
     """Tests for ArrayTimestamps dataclass."""
 
@@ -114,14 +115,14 @@ class TestArrayScoring:
 
         n = 3
         scoring = ArrayScoring(
-            cvss_version=np.array(['3.1', '3.1', '3.0'], dtype=object),
+            cvss_version=np.array(["3.1", "3.1", "3.0"], dtype=object),
             cvss_score=np.array([9.8, 7.5, 4.0], dtype=np.float32),
             cvss_exploitability_score=np.array([3.9, 3.0, 2.0], dtype=np.float32),
             cvss_impact_score=np.array([5.9, 5.2, 3.6], dtype=np.float32),
         )
         assert scoring.cvss_score[0] == 9.8
         assert len(scoring.cvss_impact_score) == n
-        assert scoring.cvss_version[0] == '3.1'
+        assert scoring.cvss_version[0] == "3.1"
 
 
 class TestArrayEnrichment:

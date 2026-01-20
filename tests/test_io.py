@@ -1243,12 +1243,12 @@ class TestDataFrameIntegration:
         base = datetime(2024, 1, 1)
 
         # Create vulnerability with various events to trigger analytical properties
-        v1 = CVDVulnerability('CVE-2024-001')
+        v1 = CVDVulnerability("CVE-2024-001")
         v1.apply_event(CVDEvent.X, timestamp=base)  # Exploit before vendor awareness
         v1.apply_event(CVDEvent.V, timestamp=base + timedelta(days=5))
         v1.apply_event(CVDEvent.F, timestamp=base + timedelta(days=10))
 
-        v2 = CVDVulnerability('CVE-2024-002')
+        v2 = CVDVulnerability("CVE-2024-002")
         v2.apply_event(CVDEvent.V, timestamp=base)
         v2.apply_event(CVDEvent.F, timestamp=base + timedelta(days=10))
         v2.apply_event(CVDEvent.P, timestamp=base + timedelta(days=30))
@@ -1278,7 +1278,9 @@ class TestDataFrameIntegration:
 
         # Verify values are correct for v2 (coordinated disclosure case)
         assert df.loc[1, "is_coordinated"], "v2 should have is_coordinated=True"
-        assert df.loc[1, "is_responsible_disclosure"], "v2 should have is_responsible_disclosure=True"
+        assert df.loc[
+            1, "is_responsible_disclosure"
+        ], "v2 should have is_responsible_disclosure=True"
 
     def test_to_dataframe_includes_original_analytical_properties(self):
         """Verify DataFrame includes original analytical properties from before Phase 5."""
@@ -1286,7 +1288,7 @@ class TestDataFrameIntegration:
 
         base = datetime(2024, 1, 1)
 
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.V, timestamp=base)
         v.apply_event(CVDEvent.F, timestamp=base + timedelta(days=10))
         v.apply_event(CVDEvent.X, timestamp=base + timedelta(days=20))
@@ -1375,7 +1377,7 @@ class TestDataFrameIntegration:
         base = datetime(2024, 1, 1)
 
         # Create vulnerability with specific analytical property values
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.X, timestamp=base)
         v.apply_event(CVDEvent.V, timestamp=base + timedelta(days=5))
         v.apply_event(CVDEvent.F, timestamp=base + timedelta(days=10))
@@ -1405,7 +1407,7 @@ class TestSerializationRoundTrip:
         base = datetime(2024, 1, 1)
 
         # Create vulnerability with events that trigger analytical properties
-        v1 = CVDVulnerability('CVE-2024-001')
+        v1 = CVDVulnerability("CVE-2024-001")
         v1.apply_event(CVDEvent.X, timestamp=base)
         v1.apply_event(CVDEvent.V, timestamp=base + timedelta(days=5))
         v1.apply_event(CVDEvent.F, timestamp=base + timedelta(days=10))
@@ -1429,7 +1431,7 @@ class TestSerializationRoundTrip:
 
         base = datetime(2024, 1, 1)
 
-        v1 = CVDVulnerability('CVE-2024-001')
+        v1 = CVDVulnerability("CVE-2024-001")
         v1.apply_event(CVDEvent.V, timestamp=base)
         v1.apply_event(CVDEvent.F, timestamp=base + timedelta(days=10))
         v1.apply_event(CVDEvent.P, timestamp=base + timedelta(days=30))
@@ -1451,12 +1453,12 @@ class TestSerializationRoundTrip:
 
         base = datetime(2024, 1, 1)
 
-        v1 = CVDVulnerability('CVE-2024-001')
+        v1 = CVDVulnerability("CVE-2024-001")
         v1.apply_event(CVDEvent.X, timestamp=base)
         v1.apply_event(CVDEvent.V, timestamp=base + timedelta(days=5))
         v1.apply_event(CVDEvent.A, timestamp=base + timedelta(days=10))
 
-        v2 = CVDVulnerability('CVE-2024-002')
+        v2 = CVDVulnerability("CVE-2024-002")
         v2.apply_event(CVDEvent.V, timestamp=base)
         v2.apply_event(CVDEvent.F, timestamp=base + timedelta(days=10))
         v2.apply_event(CVDEvent.X, timestamp=base + timedelta(days=20))
@@ -1481,41 +1483,41 @@ class TestCPEParser:
         """CPE parser extracts vendor_id and product_id."""
         from vulnstate.parsers import parse_cpe
 
-        result = parse_cpe('cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*')
-        assert result['vendor_id'] == 'apache'
-        assert result['product_id'] == 'log4j'
+        result = parse_cpe("cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*")
+        assert result["vendor_id"] == "apache"
+        assert result["product_id"] == "log4j"
 
     def test_parse_cpe_handles_os_type(self):
         """CPE parser handles OS-type CPE strings."""
         from vulnstate.parsers import parse_cpe
 
-        result = parse_cpe('cpe:2.3:o:microsoft:windows_10:*:*:*:*:*:*:*:*')
-        assert result['vendor_id'] == 'microsoft'
-        assert result['product_id'] == 'windows_10'
+        result = parse_cpe("cpe:2.3:o:microsoft:windows_10:*:*:*:*:*:*:*:*")
+        assert result["vendor_id"] == "microsoft"
+        assert result["product_id"] == "windows_10"
 
     def test_parse_cpe_handles_none(self):
         """CPE parser returns None values for None input."""
         from vulnstate.parsers import parse_cpe
 
         result = parse_cpe(None)
-        assert result['vendor_id'] is None
-        assert result['product_id'] is None
+        assert result["vendor_id"] is None
+        assert result["product_id"] is None
 
     def test_parse_cpe_handles_invalid_format(self):
         """CPE parser returns None values for invalid format."""
         from vulnstate.parsers import parse_cpe
 
-        result = parse_cpe('not-a-cpe-string')
-        assert result['vendor_id'] is None
-        assert result['product_id'] is None
+        result = parse_cpe("not-a-cpe-string")
+        assert result["vendor_id"] is None
+        assert result["product_id"] is None
 
     def test_parse_cpe_handles_wildcard_vendor(self):
         """CPE parser treats wildcards as None."""
         from vulnstate.parsers import parse_cpe
 
-        result = parse_cpe('cpe:2.3:a:*:someproduct:1.0:*:*:*:*:*:*:*')
-        assert result['vendor_id'] is None
-        assert result['product_id'] == 'someproduct'
+        result = parse_cpe("cpe:2.3:a:*:someproduct:1.0:*:*:*:*:*:*:*")
+        assert result["vendor_id"] is None
+        assert result["product_id"] == "someproduct"
 
 
 class TestNVDMetadataExtraction:
@@ -1526,11 +1528,7 @@ class TestNVDMetadataExtraction:
         from vulnstate.parsers import NVDParser
 
         item = {
-            "cve": {
-                "descriptions": [
-                    {"lang": "en", "value": "Test vulnerability description"}
-                ]
-            }
+            "cve": {"descriptions": [{"lang": "en", "value": "Test vulnerability description"}]}
         }
 
         desc = NVDParser.extract_description(item, "2.0")
@@ -1541,16 +1539,7 @@ class TestNVDMetadataExtraction:
         from vulnstate.parsers import NVDParser
 
         item = {
-            "cve": {
-                "weaknesses": [
-                    {
-                        "description": [
-                            {"value": "CWE-79"},
-                            {"value": "CWE-89"}
-                        ]
-                    }
-                ]
-            }
+            "cve": {"weaknesses": [{"description": [{"value": "CWE-79"}, {"value": "CWE-89"}]}]}
         }
 
         cwe_ids = NVDParser.extract_cwe_ids(item, "2.0")
@@ -1560,19 +1549,7 @@ class TestNVDMetadataExtraction:
         """NVD parser extracts severity level."""
         from vulnstate.parsers import NVDParser
 
-        item = {
-            "cve": {
-                "metrics": {
-                    "cvssMetricV31": [
-                        {
-                            "cvssData": {
-                                "baseSeverity": "HIGH"
-                            }
-                        }
-                    ]
-                }
-            }
-        }
+        item = {"cve": {"metrics": {"cvssMetricV31": [{"cvssData": {"baseSeverity": "HIGH"}}]}}}
 
         severity = NVDParser.extract_severity(item, "2.0")
         assert severity == "HIGH"
@@ -1589,7 +1566,7 @@ class TestNVDMetadataExtraction:
                             {
                                 "cpeMatch": [
                                     {"criteria": "cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*"},
-                                    {"criteria": "cpe:2.3:a:apache:struts:2.5.0:*:*:*:*:*:*:*"}
+                                    {"criteria": "cpe:2.3:a:apache:struts:2.5.0:*:*:*:*:*:*:*"},
                                 ]
                             }
                         ]
@@ -1610,7 +1587,7 @@ class TestNVDMetadataExtraction:
         cpes = [
             "cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*",
             "cpe:2.3:a:apache:struts:2.5.0:*:*:*:*:*:*:*",
-            "cpe:2.3:a:microsoft:exchange:2019:*:*:*:*:*:*:*"
+            "cpe:2.3:a:microsoft:exchange:2019:*:*:*:*:*:*:*",
         ]
 
         vendors, products = NVDParser.extract_vendors_products(cpes)
@@ -1631,12 +1608,12 @@ class TestNVDMetadataExtraction:
                             {
                                 "cpeMatch": [
                                     {"criteria": "cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*"},
-                                    {"criteria": "cpe:2.3:a:apache:struts:2.5.0:*:*:*:*:*:*:*"}
+                                    {"criteria": "cpe:2.3:a:apache:struts:2.5.0:*:*:*:*:*:*:*"},
                                 ]
                             }
                         ]
                     }
-                ]
+                ],
             }
         }
 
@@ -1659,17 +1636,9 @@ class TestNVDMetadataExtraction:
                 "id": "CVE-2024-12345",
                 "published": "2024-01-15T00:00:00Z",
                 "lastModified": "2024-01-20T00:00:00Z",
-                "descriptions": [
-                    {"lang": "en", "value": "Test description"}
-                ],
-                "weaknesses": [
-                    {"description": [{"value": "CWE-79"}]}
-                ],
-                "metrics": {
-                    "cvssMetricV31": [
-                        {"cvssData": {"baseSeverity": "CRITICAL"}}
-                    ]
-                },
+                "descriptions": [{"lang": "en", "value": "Test description"}],
+                "weaknesses": [{"description": [{"value": "CWE-79"}]}],
+                "metrics": {"cvssMetricV31": [{"cvssData": {"baseSeverity": "CRITICAL"}}]},
                 "configurations": [
                     {
                         "nodes": [
@@ -1680,7 +1649,7 @@ class TestNVDMetadataExtraction:
                             }
                         ]
                     }
-                ]
+                ],
             }
         }
 

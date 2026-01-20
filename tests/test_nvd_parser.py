@@ -13,7 +13,6 @@ Coverage:
 - Integration with CVDArray
 """
 
-
 import pytest
 
 from vulnstate import CVDArray
@@ -77,8 +76,14 @@ class TestCVSSExtraction:
             "cve": {
                 "metrics": {
                     "cvssMetricV31": [
-                        {"type": "Secondary", "cvssData": {"baseScore": 7.0, "vectorString": "CVSS:3.1/AV:N/AC:L"}},
-                        {"type": "Primary", "cvssData": {"baseScore": 9.8, "vectorString": "CVSS:3.1/AV:N/AC:H"}},
+                        {
+                            "type": "Secondary",
+                            "cvssData": {"baseScore": 7.0, "vectorString": "CVSS:3.1/AV:N/AC:L"},
+                        },
+                        {
+                            "type": "Primary",
+                            "cvssData": {"baseScore": 9.8, "vectorString": "CVSS:3.1/AV:N/AC:H"},
+                        },
                     ]
                 }
             }
@@ -93,7 +98,10 @@ class TestCVSSExtraction:
             "cve": {
                 "metrics": {
                     "cvssMetricV31": [
-                        {"type": "Secondary", "cvssData": {"baseScore": 7.5, "vectorString": "CVSS:3.1/AV:N"}},
+                        {
+                            "type": "Secondary",
+                            "cvssData": {"baseScore": 7.5, "vectorString": "CVSS:3.1/AV:N"},
+                        },
                     ]
                 }
             }
@@ -136,9 +144,7 @@ class TestCVSSExtraction:
         """Extract CVSS v3 from NVD 1.1 format."""
         item = {
             "impact": {
-                "baseMetricV3": {
-                    "cvssV3": {"baseScore": 8.8, "vectorString": "CVSS:3.0/AV:N/AC:L"}
-                }
+                "baseMetricV3": {"cvssV3": {"baseScore": 8.8, "vectorString": "CVSS:3.0/AV:N/AC:L"}}
             }
         }
         score, vector, exploit, impact = NVDParser.extract_cvss(item, "1.1")
@@ -148,11 +154,7 @@ class TestCVSSExtraction:
     def test_extract_cvss_v2_fallback_nvd_11(self):
         """Fallback to CVSS v2 in NVD 1.1 format."""
         item = {
-            "impact": {
-                "baseMetricV2": {
-                    "cvssV2": {"baseScore": 7.5, "vectorString": "AV:N/AC:L"}
-                }
-            }
+            "impact": {"baseMetricV2": {"cvssV2": {"baseScore": 7.5, "vectorString": "AV:N/AC:L"}}}
         }
         score, vector, exploit, impact = NVDParser.extract_cvss(item, "1.1")
         assert score == 7.5
@@ -239,7 +241,10 @@ class TestVulnerabilityCreation:
                 "published": "2023-01-15T10:00:00.000",
                 "metrics": {
                     "cvssMetricV31": [
-                        {"type": "Primary", "cvssData": {"baseScore": 9.8, "vectorString": "CVSS:3.1/AV:N"}}
+                        {
+                            "type": "Primary",
+                            "cvssData": {"baseScore": 9.8, "vectorString": "CVSS:3.1/AV:N"},
+                        }
                     ]
                 },
             }
@@ -256,9 +261,7 @@ class TestVulnerabilityCreation:
         item = {
             "publishedDate": "2023-01-15T10:00:00.000",
             "impact": {
-                "baseMetricV3": {
-                    "cvssV3": {"baseScore": 7.5, "vectorString": "CVSS:3.0/AV:N"}
-                }
+                "baseMetricV3": {"cvssV3": {"baseScore": 7.5, "vectorString": "CVSS:3.0/AV:N"}}
             },
         }
         vuln = NVDParser.create_vuln_from_item("CVE-2023-12345", item, "1.1")
@@ -281,7 +284,10 @@ class TestBackwardCompatibility:
                     "id": "CVE-2023-0001",
                     "metrics": {
                         "cvssMetricV31": [
-                            {"type": "Primary", "cvssData": {"baseScore": 8.8, "vectorString": "CVSS:3.1/AV:N"}}
+                            {
+                                "type": "Primary",
+                                "cvssData": {"baseScore": 8.8, "vectorString": "CVSS:3.1/AV:N"},
+                            }
                         ]
                     },
                 }
@@ -303,9 +309,7 @@ class TestBackwardCompatibility:
                 "cve": {
                     "id": "CVE-2023-0002",
                     "metrics": {
-                        "cvssMetricV31": [
-                            {"type": "Primary", "cvssData": {"baseScore": 7.5}}
-                        ]
+                        "cvssMetricV31": [{"type": "Primary", "cvssData": {"baseScore": 7.5}}]
                     },
                 }
             }
@@ -319,9 +323,7 @@ class TestBackwardCompatibility:
 
     def test_from_nvd_via_cvdio(self):
         """Ensure CVDIO.from_nvd() delegates to NVDParser."""
-        nvd_items = [
-            {"cve": {"id": "CVE-2023-0003", "metrics": {}}}
-        ]
+        nvd_items = [{"cve": {"id": "CVE-2023-0003", "metrics": {}}}]
 
         arr = CVDIO.from_nvd(nvd_items, format_version="2.0")
 
@@ -341,9 +343,7 @@ class TestIntegration:
                 "cve": {
                     "id": "CVE-2023-0001",
                     "metrics": {
-                        "cvssMetricV31": [
-                            {"type": "Primary", "cvssData": {"baseScore": 9.8}}
-                        ]
+                        "cvssMetricV31": [{"type": "Primary", "cvssData": {"baseScore": 9.8}}]
                     },
                 }
             },
@@ -351,22 +351,14 @@ class TestIntegration:
             {
                 "cve": {
                     "id": "CVE-2023-0002",
-                    "metrics": {
-                        "cvssMetricV30": [
-                            {"cvssData": {"baseScore": 7.5}}
-                        ]
-                    },
+                    "metrics": {"cvssMetricV30": [{"cvssData": {"baseScore": 7.5}}]},
                 }
             },
             # Has only v2
             {
                 "cve": {
                     "id": "CVE-2023-0003",
-                    "metrics": {
-                        "cvssMetricV2": [
-                            {"cvssData": {"baseScore": 5.0}}
-                        ]
-                    },
+                    "metrics": {"cvssMetricV2": [{"cvssData": {"baseScore": 5.0}}]},
                 }
             },
         ]
@@ -412,9 +404,7 @@ class TestIntegration:
                 "cve": {
                     "id": "CVE-2023-0001",
                     "metrics": {
-                        "cvssMetricV31": [
-                            {"type": "Primary", "cvssData": {"baseScore": 8.8}}
-                        ]
+                        "cvssMetricV31": [{"type": "Primary", "cvssData": {"baseScore": 8.8}}]
                     },
                 }
             }

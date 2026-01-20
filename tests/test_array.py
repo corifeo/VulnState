@@ -891,7 +891,7 @@ class TestFixedSizeSemantics:
 
     def test_constructor_with_list_creates_dynamic_array(self):
         """Verify CVDArray([...]) creates dynamic array."""
-        vulns = [CVDVulnerability(f'CVE-{i}') for i in range(10)]
+        vulns = [CVDVulnerability(f"CVE-{i}") for i in range(10)]
         arr = CVDArray(vulns)
         assert arr.is_fixed_size is False
         assert len(arr) == 10
@@ -902,7 +902,7 @@ class TestFixedSizeSemantics:
         assert arr.is_fixed_size is True
 
         # Trigger rebuild by directly calling _from_list
-        vulns = [CVDVulnerability(f'CVE-{i}') for i in range(50)]
+        vulns = [CVDVulnerability(f"CVE-{i}") for i in range(50)]
         arr._from_list(vulns)
 
         # After rebuild, flag should still be True
@@ -914,7 +914,7 @@ class TestFixedSizeSemantics:
         assert arr.is_fixed_size is False
 
         # Trigger rebuild by directly calling _from_list
-        vulns = [CVDVulnerability(f'CVE-{i}') for i in range(50)]
+        vulns = [CVDVulnerability(f"CVE-{i}") for i in range(50)]
         arr._from_list(vulns)
 
         # After rebuild, flag should still be False
@@ -926,34 +926,34 @@ class TestNewAPIConsistencyProperties:
 
     def test_cve_ids_property_returns_array(self):
         """Verify cve_ids property returns CVE ID array."""
-        v1 = CVDVulnerability('CVE-2024-001')
-        v2 = CVDVulnerability('CVE-2024-002')
-        v3 = CVDVulnerability('CVE-2024-003')
+        v1 = CVDVulnerability("CVE-2024-001")
+        v2 = CVDVulnerability("CVE-2024-002")
+        v3 = CVDVulnerability("CVE-2024-003")
         arr = CVDArray([v1, v2, v3])
 
         cve_ids = arr.cve_ids
         assert isinstance(cve_ids, np.ndarray)
         assert len(cve_ids) == 3
-        assert cve_ids[0] == 'CVE-2024-001'
-        assert cve_ids[1] == 'CVE-2024-002'
-        assert cve_ids[2] == 'CVE-2024-003'
+        assert cve_ids[0] == "CVE-2024-001"
+        assert cve_ids[1] == "CVE-2024-002"
+        assert cve_ids[2] == "CVE-2024-003"
 
     def test_cve_ids_can_be_used_for_filtering(self):
         """Verify cve_ids can be used to filter vulnerabilities."""
-        v1 = CVDVulnerability('CVE-2024-001')
-        v2 = CVDVulnerability('CVE-2024-002')
-        v3 = CVDVulnerability('CVE-2024-003')
+        v1 = CVDVulnerability("CVE-2024-001")
+        v2 = CVDVulnerability("CVE-2024-002")
+        v3 = CVDVulnerability("CVE-2024-003")
         arr = CVDArray([v1, v2, v3])
 
-        mask = arr.cve_ids == 'CVE-2024-002'
+        mask = arr.cve_ids == "CVE-2024-002"
         filtered = arr[mask]
 
         assert len(filtered) == 1
-        assert filtered.get(0).cve_id == 'CVE-2024-002'
+        assert filtered.get(0).cve_id == "CVE-2024-002"
 
     def test_events_property_returns_dict(self):
         """Verify events property returns dict of timestamp arrays."""
-        v1 = CVDVulnerability('CVE-2024-001')
+        v1 = CVDVulnerability("CVE-2024-001")
         v1.apply_event(CVDEvent.V)
         v1.apply_event(CVDEvent.F)
 
@@ -968,9 +968,9 @@ class TestNewAPIConsistencyProperties:
 
     def test_events_dict_matches_exploded_timestamps(self):
         """Verify arr.events matches exploded timestamp properties."""
-        v1 = CVDVulnerability('CVE-2024-001')
+        v1 = CVDVulnerability("CVE-2024-001")
         v1.apply_event(CVDEvent.V)
-        v2 = CVDVulnerability('CVE-2024-002')
+        v2 = CVDVulnerability("CVE-2024-002")
         v2.apply_event(CVDEvent.F)
 
         arr = CVDArray([v1, v2])
@@ -987,9 +987,10 @@ class TestNewAPIConsistencyProperties:
     def test_is_zero_day_exploit_true_when_x_before_v(self):
         """Verify is_zero_day_exploit true when X before V."""
         from datetime import datetime, timedelta
+
         base = datetime(2024, 1, 1)
 
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.X, timestamp=base)
         v.apply_event(CVDEvent.V, timestamp=base + timedelta(days=5))
 
@@ -1001,9 +1002,10 @@ class TestNewAPIConsistencyProperties:
     def test_is_zero_day_attack_true_when_a_before_v(self):
         """Verify is_zero_day_attack true when A before V."""
         from datetime import datetime, timedelta
+
         base = datetime(2024, 1, 1)
 
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.A, timestamp=base)
         v.apply_event(CVDEvent.V, timestamp=base + timedelta(days=3))
 
@@ -1015,9 +1017,10 @@ class TestNewAPIConsistencyProperties:
     def test_is_coordinated_true_when_v_before_p(self):
         """Verify is_coordinated true when V before P."""
         from datetime import datetime, timedelta
+
         base = datetime(2024, 1, 1)
 
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.V, timestamp=base)
         v.apply_event(CVDEvent.P, timestamp=base + timedelta(days=30))
 
@@ -1029,9 +1032,10 @@ class TestNewAPIConsistencyProperties:
     def test_is_responsible_disclosure_true_when_v_f_p_ordered(self):
         """Verify is_responsible_disclosure true when V→F→P."""
         from datetime import datetime, timedelta
+
         base = datetime(2024, 1, 1)
 
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.V, timestamp=base)
         v.apply_event(CVDEvent.F, timestamp=base + timedelta(days=10))
         v.apply_event(CVDEvent.P, timestamp=base + timedelta(days=30))
@@ -1044,9 +1048,10 @@ class TestNewAPIConsistencyProperties:
     def test_has_fix_before_exploit_true_when_f_before_x(self):
         """Verify has_fix_before_exploit true when F before X."""
         from datetime import datetime, timedelta
+
         base = datetime(2024, 1, 1)
 
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.V, timestamp=base)
         v.apply_event(CVDEvent.F, timestamp=base + timedelta(days=10))
         v.apply_event(CVDEvent.X, timestamp=base + timedelta(days=20))
@@ -1059,9 +1064,10 @@ class TestNewAPIConsistencyProperties:
     def test_has_fix_before_attack_true_when_f_before_a(self):
         """Verify has_fix_before_attack true when F before A."""
         from datetime import datetime, timedelta
+
         base = datetime(2024, 1, 1)
 
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.V, timestamp=base)
         v.apply_event(CVDEvent.F, timestamp=base + timedelta(days=10))
         v.apply_event(CVDEvent.A, timestamp=base + timedelta(days=20))
@@ -1074,9 +1080,10 @@ class TestNewAPIConsistencyProperties:
     def test_has_deployment_before_exploit_true_when_d_before_x(self):
         """Verify has_deployment_before_exploit true when D before X."""
         from datetime import datetime, timedelta
+
         base = datetime(2024, 1, 1)
 
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.V, timestamp=base)
         v.apply_event(CVDEvent.F, timestamp=base + timedelta(days=10))
         v.apply_event(CVDEvent.D, timestamp=base + timedelta(days=15))
@@ -1090,9 +1097,10 @@ class TestNewAPIConsistencyProperties:
     def test_has_deployment_before_attack_true_when_d_before_a(self):
         """Verify has_deployment_before_attack true when D before A."""
         from datetime import datetime, timedelta
+
         base = datetime(2024, 1, 1)
 
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.V, timestamp=base)
         v.apply_event(CVDEvent.F, timestamp=base + timedelta(days=10))
         v.apply_event(CVDEvent.D, timestamp=base + timedelta(days=15))
@@ -1106,9 +1114,10 @@ class TestNewAPIConsistencyProperties:
     def test_is_private_attack_true_when_a_without_x(self):
         """Verify is_private_attack true when A without X."""
         from datetime import datetime, timedelta
+
         base = datetime(2024, 1, 1)
 
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.V, timestamp=base)
         v.apply_event(CVDEvent.A, timestamp=base + timedelta(days=5))
 
@@ -1121,9 +1130,10 @@ class TestNewAPIConsistencyProperties:
     def test_is_mass_exploitation_true_when_both_x_and_a(self):
         """Verify is_mass_exploitation true when both X and A."""
         from datetime import datetime, timedelta
+
         base = datetime(2024, 1, 1)
 
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.V, timestamp=base)
         v.apply_event(CVDEvent.X, timestamp=base + timedelta(days=5))
         v.apply_event(CVDEvent.A, timestamp=base + timedelta(days=10))
@@ -1137,16 +1147,21 @@ class TestNewAPIConsistencyProperties:
 
     def test_all_new_analytical_properties_return_boolean_arrays(self):
         """Verify all new analytical properties return boolean arrays."""
-        v1 = CVDVulnerability('CVE-2024-001')
-        v2 = CVDVulnerability('CVE-2024-002')
+        v1 = CVDVulnerability("CVE-2024-001")
+        v2 = CVDVulnerability("CVE-2024-002")
         arr = CVDArray([v1, v2])
 
         props = [
-            'is_zero_day_exploit', 'is_zero_day_attack', 'is_coordinated',
-            'is_responsible_disclosure', 'has_fix_before_exploit',
-            'has_fix_before_attack', 'has_deployment_before_exploit',
-            'has_deployment_before_attack', 'is_private_attack',
-            'is_mass_exploitation'
+            "is_zero_day_exploit",
+            "is_zero_day_attack",
+            "is_coordinated",
+            "is_responsible_disclosure",
+            "has_fix_before_exploit",
+            "has_fix_before_attack",
+            "has_deployment_before_exploit",
+            "has_deployment_before_attack",
+            "is_private_attack",
+            "is_mass_exploitation",
         ]
 
         for prop in props:
@@ -1160,28 +1175,28 @@ def test_cvss_properties():
     """Test CVSS metric properties."""
     from vulnstate import CVDArray, CVDVulnerability
 
-    v = CVDVulnerability('CVE-2024-001')
+    v = CVDVulnerability("CVE-2024-001")
     v.scoring.cve_vector = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
     v.scoring.cvss_base_score = 9.8
 
     arr = CVDArray([v])
 
     assert arr.cvss_scores[0] == 9.8
-    assert arr.attack_vector[0] == 'N'
-    assert arr.attack_complexity[0] == 'L'
-    assert arr.privileges_required[0] == 'N'
-    assert arr.user_interaction[0] == 'N'
-    assert arr.scope[0] == 'U'
-    assert arr.confidentiality_impact[0] == 'H'
-    assert arr.integrity_impact[0] == 'H'
-    assert arr.availability_impact[0] == 'H'
+    assert arr.attack_vector[0] == "N"
+    assert arr.attack_complexity[0] == "L"
+    assert arr.privileges_required[0] == "N"
+    assert arr.user_interaction[0] == "N"
+    assert arr.scope[0] == "U"
+    assert arr.confidentiality_impact[0] == "H"
+    assert arr.integrity_impact[0] == "H"
+    assert arr.availability_impact[0] == "H"
 
 
 def test_enrichment_properties():
     """Test enrichment properties (epss, kev)."""
     from vulnstate import CVDArray, CVDVulnerability
 
-    v = CVDVulnerability('CVE-2024-001')
+    v = CVDVulnerability("CVE-2024-001")
     v.enrichment.epss = 0.85
     v.enrichment.is_kev = True
 
@@ -1197,9 +1212,10 @@ class TestAnalyticalPropertiesEdgeCases:
     def test_is_zero_day_exploit_false_when_v_before_x(self):
         """Verify is_zero_day_exploit False when V before X (negative case)."""
         from datetime import datetime, timedelta
+
         base = datetime(2024, 1, 1)
 
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.V, timestamp=base)
         v.apply_event(CVDEvent.X, timestamp=base + timedelta(days=10))
 
@@ -1210,7 +1226,7 @@ class TestAnalyticalPropertiesEdgeCases:
 
     def test_is_zero_day_exploit_false_with_nat_x(self):
         """Verify is_zero_day_exploit False when X is NaT (missing)."""
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.V)
         # No X event
 
@@ -1222,9 +1238,10 @@ class TestAnalyticalPropertiesEdgeCases:
     def test_is_zero_day_attack_false_when_v_before_a(self):
         """Verify is_zero_day_attack False when V before A (negative case)."""
         from datetime import datetime, timedelta
+
         base = datetime(2024, 1, 1)
 
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.V, timestamp=base)
         v.apply_event(CVDEvent.A, timestamp=base + timedelta(days=5))
 
@@ -1235,7 +1252,7 @@ class TestAnalyticalPropertiesEdgeCases:
 
     def test_is_zero_day_attack_false_with_nat_a(self):
         """Verify is_zero_day_attack False when A is NaT (missing)."""
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.V)
         # No A event
 
@@ -1247,9 +1264,10 @@ class TestAnalyticalPropertiesEdgeCases:
     def test_is_coordinated_false_when_p_before_v(self):
         """Verify is_coordinated False when P before V (negative case)."""
         from datetime import datetime, timedelta
+
         base = datetime(2024, 1, 1)
 
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.P, timestamp=base)
         v.apply_event(CVDEvent.V, timestamp=base + timedelta(days=5))
 
@@ -1260,7 +1278,7 @@ class TestAnalyticalPropertiesEdgeCases:
 
     def test_is_coordinated_false_with_nat_p(self):
         """Verify is_coordinated False when P is NaT (missing)."""
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.V)
         # No P event
 
@@ -1272,9 +1290,10 @@ class TestAnalyticalPropertiesEdgeCases:
     def test_is_responsible_disclosure_false_with_wrong_order(self):
         """Verify is_responsible_disclosure False when V→F→P ordering violated."""
         from datetime import datetime, timedelta
+
         base = datetime(2024, 1, 1)
 
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.V, timestamp=base)
         v.apply_event(CVDEvent.P, timestamp=base + timedelta(days=10))
         v.apply_event(CVDEvent.F, timestamp=base + timedelta(days=20))
@@ -1287,9 +1306,10 @@ class TestAnalyticalPropertiesEdgeCases:
     def test_has_fix_before_exploit_false_when_x_before_f(self):
         """Verify has_fix_before_exploit False when X before F (negative case)."""
         from datetime import datetime, timedelta
+
         base = datetime(2024, 1, 1)
 
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.V, timestamp=base)
         v.apply_event(CVDEvent.X, timestamp=base + timedelta(days=5))
         v.apply_event(CVDEvent.F, timestamp=base + timedelta(days=10))
@@ -1301,7 +1321,7 @@ class TestAnalyticalPropertiesEdgeCases:
 
     def test_has_fix_before_exploit_false_with_nat_x(self):
         """Verify has_fix_before_exploit False when X is NaT."""
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.V)
         v.apply_event(CVDEvent.F)
         # No X event
@@ -1314,9 +1334,10 @@ class TestAnalyticalPropertiesEdgeCases:
     def test_has_fix_before_attack_false_when_a_before_f(self):
         """Verify has_fix_before_attack False when A before F (negative case)."""
         from datetime import datetime, timedelta
+
         base = datetime(2024, 1, 1)
 
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.V, timestamp=base)
         v.apply_event(CVDEvent.A, timestamp=base + timedelta(days=5))
         v.apply_event(CVDEvent.F, timestamp=base + timedelta(days=10))
@@ -1329,9 +1350,10 @@ class TestAnalyticalPropertiesEdgeCases:
     def test_has_deployment_before_exploit_false_when_x_before_d(self):
         """Verify has_deployment_before_exploit False when X before D."""
         from datetime import datetime, timedelta
+
         base = datetime(2024, 1, 1)
 
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.V, timestamp=base)
         v.apply_event(CVDEvent.F, timestamp=base + timedelta(days=5))
         v.apply_event(CVDEvent.X, timestamp=base + timedelta(days=10))
@@ -1345,9 +1367,10 @@ class TestAnalyticalPropertiesEdgeCases:
     def test_has_deployment_before_attack_false_when_a_before_d(self):
         """Verify has_deployment_before_attack False when A before D."""
         from datetime import datetime, timedelta
+
         base = datetime(2024, 1, 1)
 
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.V, timestamp=base)
         v.apply_event(CVDEvent.F, timestamp=base + timedelta(days=5))
         v.apply_event(CVDEvent.A, timestamp=base + timedelta(days=10))
@@ -1361,9 +1384,10 @@ class TestAnalyticalPropertiesEdgeCases:
     def test_is_private_attack_false_when_x_present(self):
         """Verify is_private_attack False when X event present."""
         from datetime import datetime
+
         base = datetime(2024, 1, 1)
 
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.V, timestamp=base)
         v.apply_event(CVDEvent.X, timestamp=base)
         v.apply_event(CVDEvent.A, timestamp=base)
@@ -1376,9 +1400,10 @@ class TestAnalyticalPropertiesEdgeCases:
     def test_is_mass_exploitation_false_when_only_x(self):
         """Verify is_mass_exploitation False when only X present (needs both X and A)."""
         from datetime import datetime
+
         base = datetime(2024, 1, 1)
 
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.V, timestamp=base)
         v.apply_event(CVDEvent.X, timestamp=base)
         # No A event
@@ -1391,9 +1416,10 @@ class TestAnalyticalPropertiesEdgeCases:
     def test_is_mass_exploitation_false_when_only_a(self):
         """Verify is_mass_exploitation False when only A present (needs both X and A)."""
         from datetime import datetime
+
         base = datetime(2024, 1, 1)
 
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.V, timestamp=base)
         v.apply_event(CVDEvent.A, timestamp=base)
         # No X event
@@ -1420,7 +1446,7 @@ class TestAnalyticalPropertiesEdgeCases:
 
     def test_all_analytical_properties_with_single_element_array(self):
         """Verify all properties work with single-element array."""
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         arr = CVDArray([v])
 
         # All should return length 1 boolean arrays
@@ -1437,9 +1463,9 @@ class TestAnalyticalPropertiesEdgeCases:
 
     def test_analytical_properties_with_no_events_all_nat(self):
         """Verify all properties return False when no events have occurred (all NaT)."""
-        v1 = CVDVulnerability('CVE-2024-001')
-        v2 = CVDVulnerability('CVE-2024-002')
-        v3 = CVDVulnerability('CVE-2024-003')
+        v1 = CVDVulnerability("CVE-2024-001")
+        v2 = CVDVulnerability("CVE-2024-002")
+        v3 = CVDVulnerability("CVE-2024-003")
         # No events applied
         arr = CVDArray([v1, v2, v3])
 
@@ -1462,9 +1488,10 @@ class TestPropertyConsistency:
     def test_is_zero_day_includes_is_zero_day_exploit(self):
         """Verify is_zero_day is True if is_zero_day_exploit is True."""
         from datetime import datetime, timedelta
+
         base = datetime(2024, 1, 1)
 
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.X, timestamp=base)
         v.apply_event(CVDEvent.V, timestamp=base + timedelta(days=5))
 
@@ -1478,9 +1505,10 @@ class TestPropertyConsistency:
     def test_is_zero_day_includes_is_zero_day_attack(self):
         """Verify is_zero_day is True if is_zero_day_attack is True."""
         from datetime import datetime, timedelta
+
         base = datetime(2024, 1, 1)
 
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.A, timestamp=base)
         v.apply_event(CVDEvent.V, timestamp=base + timedelta(days=5))
 
@@ -1494,9 +1522,10 @@ class TestPropertyConsistency:
     def test_is_mass_exploitation_requires_both_weaponized_and_under_attack(self):
         """Verify is_mass_exploitation requires both is_weaponized AND is_under_attack."""
         from datetime import datetime, timedelta
+
         base = datetime(2024, 1, 1)
 
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.V, timestamp=base)
         v.apply_event(CVDEvent.X, timestamp=base + timedelta(days=5))
         v.apply_event(CVDEvent.A, timestamp=base + timedelta(days=10))
@@ -1524,15 +1553,16 @@ class TestPropertyConsistency:
     def test_is_private_attack_and_is_mass_exploitation_mutually_exclusive(self):
         """Verify is_private_attack and is_mass_exploitation are mutually exclusive."""
         from datetime import datetime, timedelta
+
         base = datetime(2024, 1, 1)
 
         # Case 1: Private attack (A without X)
-        v1 = CVDVulnerability('CVE-2024-001')
+        v1 = CVDVulnerability("CVE-2024-001")
         v1.apply_event(CVDEvent.V, timestamp=base)
         v1.apply_event(CVDEvent.A, timestamp=base + timedelta(days=5))
 
         # Case 2: Mass exploitation (both X and A)
-        v2 = CVDVulnerability('CVE-2024-002')
+        v2 = CVDVulnerability("CVE-2024-002")
         v2.apply_event(CVDEvent.V, timestamp=base)
         v2.apply_event(CVDEvent.X, timestamp=base + timedelta(days=5))
         v2.apply_event(CVDEvent.A, timestamp=base + timedelta(days=10))
@@ -1564,10 +1594,11 @@ class TestPairMaskAndHistoryId:
     def test_pair_mask_coordinated_disclosure(self):
         """Verify pair_mask bit 2 (V≺P) is set for coordinated disclosure."""
         from datetime import datetime, timedelta
+
         base = datetime(2024, 1, 1)
 
         # Coordinated: V before P
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.V, timestamp=base)
         v.apply_event(CVDEvent.P, timestamp=base + timedelta(days=10))
 
@@ -1580,10 +1611,11 @@ class TestPairMaskAndHistoryId:
     def test_pair_mask_uncoordinated_disclosure(self):
         """Verify pair_mask bit 2 (V≺P) is clear for uncoordinated disclosure."""
         from datetime import datetime, timedelta
+
         base = datetime(2024, 1, 1)
 
         # Uncoordinated: P before V
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.P, timestamp=base)
         v.apply_event(CVDEvent.V, timestamp=base + timedelta(days=10))
 
@@ -1596,10 +1628,11 @@ class TestPairMaskAndHistoryId:
     def test_pair_mask_simultaneous_events_treated_as_not_satisfied(self):
         """Verify simultaneous events are treated as 'not satisfied' (bit clear)."""
         from datetime import datetime
+
         base = datetime(2024, 1, 1)
 
         # V and P at exact same timestamp
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.V, timestamp=base)
         v.apply_event(CVDEvent.P, timestamp=base)  # Same timestamp!
 
@@ -1612,10 +1645,11 @@ class TestPairMaskAndHistoryId:
     def test_pair_mask_missing_event_treated_as_not_satisfied(self):
         """Verify missing events result in bit clear."""
         from datetime import datetime
+
         base = datetime(2024, 1, 1)
 
         # Only V event, no P event
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.V, timestamp=base)
 
         arr = CVDArray([v])
@@ -1627,10 +1661,11 @@ class TestPairMaskAndHistoryId:
     def test_pair_mask_zero_day_detection(self):
         """Verify pair_mask can detect zero-day exploit (X before V)."""
         from datetime import datetime, timedelta
+
         base = datetime(2024, 1, 1)
 
         # Zero-day: X before V
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.X, timestamp=base)
         v.apply_event(CVDEvent.V, timestamp=base + timedelta(days=5))
 
@@ -1656,9 +1691,10 @@ class TestPairMaskAndHistoryId:
     def test_pair_mask_dirty_after_sync(self):
         """Verify pair_mask is recomputed after sync() modifies timestamps."""
         from datetime import datetime, timedelta
+
         base = datetime(2024, 1, 1)
 
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.V, timestamp=base)
 
         arr = CVDArray([v])
@@ -1680,10 +1716,11 @@ class TestPairMaskAndHistoryId:
     def test_history_id_incomplete_history(self):
         """Verify history_id returns 255 for incomplete histories."""
         from datetime import datetime
+
         base = datetime(2024, 1, 1)
 
         # Only 3 events (incomplete)
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.V, timestamp=base)
         v.apply_event(CVDEvent.F, timestamp=base)
         v.apply_event(CVDEvent.P, timestamp=base)
@@ -1699,10 +1736,11 @@ class TestPairMaskAndHistoryId:
         from datetime import datetime, timedelta
 
         from vulnstate.constants import VALID_HISTORIES
+
         base = datetime(2024, 1, 1)
 
         # Perfect CVD: VFDPXA (index 69)
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.V, timestamp=base)
         v.apply_event(CVDEvent.F, timestamp=base + timedelta(days=10))
         v.apply_event(CVDEvent.D, timestamp=base + timedelta(days=20))
@@ -1722,10 +1760,11 @@ class TestPairMaskAndHistoryId:
         from datetime import datetime, timedelta
 
         from vulnstate.constants import VALID_HISTORIES
+
         base = datetime(2024, 1, 1)
 
         # Worst case: AXPVFD (index 0)
-        v = CVDVulnerability('CVE-2024-001')
+        v = CVDVulnerability("CVE-2024-001")
         v.apply_event(CVDEvent.A, timestamp=base)
         v.apply_event(CVDEvent.X, timestamp=base + timedelta(days=10))
         v.apply_event(CVDEvent.P, timestamp=base + timedelta(days=20))
@@ -1743,12 +1782,14 @@ class TestPairMaskAndHistoryId:
     def test_history_id_caching(self):
         """Verify history_id is cached (same object on repeated access)."""
         from datetime import datetime, timedelta
+
         base = datetime(2024, 1, 1)
 
         # Complete history
-        v = CVDVulnerability('CVE-2024-001')
-        for i, event in enumerate([CVDEvent.V, CVDEvent.F, CVDEvent.D,
-                                   CVDEvent.P, CVDEvent.X, CVDEvent.A]):
+        v = CVDVulnerability("CVE-2024-001")
+        for i, event in enumerate(
+            [CVDEvent.V, CVDEvent.F, CVDEvent.D, CVDEvent.P, CVDEvent.X, CVDEvent.A]
+        ):
             v.apply_event(event, timestamp=base + timedelta(days=i * 10))
 
         arr = CVDArray([v])
@@ -1763,12 +1804,12 @@ class TestPairMaskAndHistoryId:
     def test_history_id_dirty_after_sync(self):
         """Verify history_id is recomputed after sync() modifies timestamps."""
         from datetime import datetime, timedelta
+
         base = datetime(2024, 1, 1)
 
         # Start with 5 events (incomplete)
-        v = CVDVulnerability('CVE-2024-001')
-        for i, event in enumerate([CVDEvent.V, CVDEvent.F, CVDEvent.D,
-                                   CVDEvent.P, CVDEvent.X]):
+        v = CVDVulnerability("CVE-2024-001")
+        for i, event in enumerate([CVDEvent.V, CVDEvent.F, CVDEvent.D, CVDEvent.P, CVDEvent.X]):
             v.apply_event(event, timestamp=base + timedelta(days=i * 10))
 
         arr = CVDArray([v])
@@ -1795,16 +1836,18 @@ class TestPairMaskAndHistoryId:
     def test_history_id_mixed_complete_incomplete(self):
         """Verify history_id handles mix of complete and incomplete histories."""
         from datetime import datetime, timedelta
+
         base = datetime(2024, 1, 1)
 
         # v1: Complete (VFDPXA)
-        v1 = CVDVulnerability('CVE-2024-001')
-        for i, event in enumerate([CVDEvent.V, CVDEvent.F, CVDEvent.D,
-                                   CVDEvent.P, CVDEvent.X, CVDEvent.A]):
+        v1 = CVDVulnerability("CVE-2024-001")
+        for i, event in enumerate(
+            [CVDEvent.V, CVDEvent.F, CVDEvent.D, CVDEvent.P, CVDEvent.X, CVDEvent.A]
+        ):
             v1.apply_event(event, timestamp=base + timedelta(days=i * 10))
 
         # v2: Incomplete (only VFP)
-        v2 = CVDVulnerability('CVE-2024-002')
+        v2 = CVDVulnerability("CVE-2024-002")
         v2.apply_event(CVDEvent.V, timestamp=base)
         v2.apply_event(CVDEvent.F, timestamp=base + timedelta(days=10))
         v2.apply_event(CVDEvent.P, timestamp=base + timedelta(days=20))

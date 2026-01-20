@@ -29,6 +29,7 @@ import numpy.typing as npt
 if TYPE_CHECKING:
     import pandas as pd
 
+    from .constants import AntiDesiderataBit, DesiderataBit
     from .models import AnalysisResult
 
 from .constants import (
@@ -75,8 +76,9 @@ class CVDArray:
 
     # ==================== INITIALIZATION ====================
 
-    def __init__(self, vulnerabilities: Optional[list[CVDVulnerability]] = None,
-                 fixed_size: bool = False):
+    def __init__(
+        self, vulnerabilities: Optional[list[CVDVulnerability]] = None, fixed_size: bool = False
+    ):
         """
         Initialize array from list of vulnerabilities or create empty.
 
@@ -133,7 +135,7 @@ class CVDArray:
     def _from_list(self, vulnerabilities: list[CVDVulnerability]) -> None:
         """Build arrays from list of vulnerabilities."""
         # Store current fixed_size flag (preserve during rebuilds)
-        was_fixed = getattr(self, '_fixed_size', False)
+        was_fixed = getattr(self, "_fixed_size", False)
 
         n = len(vulnerabilities)
 
@@ -202,41 +204,56 @@ class CVDArray:
 
         # Extract scoring data
         from .parsers import NVDParser
-        self.scoring.cvss_score = np.array([
-            v.scoring.cvss_base_score if v.scoring.cvss_base_score is not None else np.nan
-            for v in vulnerabilities
-        ], dtype=np.float32)
+
+        self.scoring.cvss_score = np.array(
+            [
+                v.scoring.cvss_base_score if v.scoring.cvss_base_score is not None else np.nan
+                for v in vulnerabilities
+            ],
+            dtype=np.float32,
+        )
 
         # Parse CVSS vectors and extract metrics
         cvss_metrics = [NVDParser.parse_cvss_vector(v.scoring.cve_vector) for v in vulnerabilities]
-        self.scoring.attack_vector = np.array([m['AV'] for m in cvss_metrics], dtype=object)
-        self.scoring.attack_complexity = np.array([m['AC'] for m in cvss_metrics], dtype=object)
-        self.scoring.privileges_required = np.array([m['PR'] for m in cvss_metrics], dtype=object)
-        self.scoring.user_interaction = np.array([m['UI'] for m in cvss_metrics], dtype=object)
-        self.scoring.scope = np.array([m['S'] for m in cvss_metrics], dtype=object)
-        self.scoring.confidentiality_impact = np.array([m['C'] for m in cvss_metrics], dtype=object)
-        self.scoring.integrity_impact = np.array([m['I'] for m in cvss_metrics], dtype=object)
-        self.scoring.availability_impact = np.array([m['A'] for m in cvss_metrics], dtype=object)
+        self.scoring.attack_vector = np.array([m["AV"] for m in cvss_metrics], dtype=object)
+        self.scoring.attack_complexity = np.array([m["AC"] for m in cvss_metrics], dtype=object)
+        self.scoring.privileges_required = np.array([m["PR"] for m in cvss_metrics], dtype=object)
+        self.scoring.user_interaction = np.array([m["UI"] for m in cvss_metrics], dtype=object)
+        self.scoring.scope = np.array([m["S"] for m in cvss_metrics], dtype=object)
+        self.scoring.confidentiality_impact = np.array([m["C"] for m in cvss_metrics], dtype=object)
+        self.scoring.integrity_impact = np.array([m["I"] for m in cvss_metrics], dtype=object)
+        self.scoring.availability_impact = np.array([m["A"] for m in cvss_metrics], dtype=object)
 
         # Extract enrichment data
-        self.enrichment.epss = np.array([
-            v.enrichment.epss if v.enrichment.epss is not None else np.nan
-            for v in vulnerabilities
-        ], dtype=np.float32)
+        self.enrichment.epss = np.array(
+            [
+                v.enrichment.epss if v.enrichment.epss is not None else np.nan
+                for v in vulnerabilities
+            ],
+            dtype=np.float32,
+        )
 
-        self.enrichment.epss_percentile = np.array([
-            v.enrichment.epss_percentile if v.enrichment.epss_percentile is not None else np.nan
-            for v in vulnerabilities
-        ], dtype=np.float32)
+        self.enrichment.epss_percentile = np.array(
+            [
+                v.enrichment.epss_percentile if v.enrichment.epss_percentile is not None else np.nan
+                for v in vulnerabilities
+            ],
+            dtype=np.float32,
+        )
 
-        self.enrichment.kev = np.array([
-            v.enrichment.is_kev for v in vulnerabilities
-        ], dtype=bool)
+        self.enrichment.kev = np.array([v.enrichment.is_kev for v in vulnerabilities], dtype=bool)
 
-        self.enrichment.kev_date = np.array([
-            np.datetime64(v.enrichment.kev_date) if v.enrichment.kev_date else np.datetime64("NaT")
-            for v in vulnerabilities
-        ], dtype="datetime64[s]")
+        self.enrichment.kev_date = np.array(
+            [
+                (
+                    np.datetime64(v.enrichment.kev_date)
+                    if v.enrichment.kev_date
+                    else np.datetime64("NaT")
+                )
+                for v in vulnerabilities
+            ],
+            dtype="datetime64[s]",
+        )
 
         # Extract EPSS scores from enrichment dataclass
         epss_scores = [
@@ -303,7 +320,7 @@ class CVDArray:
             >>> arr.is_fixed_size
             False
         """
-        return getattr(self, '_fixed_size', False)
+        return getattr(self, "_fixed_size", False)
 
     # ==================== DATACLASS PROPERTY ACCESSORS ====================
 
@@ -919,6 +936,62 @@ class CVDArray:
         """
         return self.analysis.anti_desiderata_mask
 
+    def get_satisfied_desiderata(self) -> list[list[str]]:
+        """Get labels of satisfied desiderata for each vulnerability.
+
+        Returns:
+            List of lists, one per vulnerability, containing human-readable
+            labels for satisfied desiderata (e.g., "Coordinated Disclosure").
+        """
+        from .constants import get_desiderata_labels
+
+        return [get_desiderata_labels(int(m)) for m in self.desiderata_mask]
+
+    def get_violated_desiderata(self) -> list[list[str]]:
+        """Get labels of violated desiderata (anti-desiderata) for each vulnerability.
+
+        Returns:
+            List of lists, one per vulnerability, containing human-readable
+            labels for violations (e.g., "Zero-Day Exploit").
+        """
+        from .constants import get_anti_desiderata_labels
+
+        return [get_anti_desiderata_labels(int(m)) for m in self.anti_desiderata_mask]
+
+    def where_desiderata_satisfied(self, *desiderata: "DesiderataBit") -> np.ndarray:
+        """Return boolean mask where all specified desiderata are satisfied.
+
+        Args:
+            *desiderata: DesiderataBit values to check (AND logic)
+
+        Returns:
+            Boolean array where True means all specified desiderata satisfied.
+
+        Example:
+            >>> from vulnstate.constants import DesiderataBit
+            >>> coordinated = arr.where_desiderata_satisfied(DesiderataBit.D1_V_P)
+            >>> arr[coordinated]  # Filter to coordinated disclosures
+        """
+        required = sum(1 << d for d in desiderata)
+        return (self.desiderata_mask & required) == required
+
+    def where_desiderata_violated(self, *anti_desiderata: "AntiDesiderataBit") -> np.ndarray:
+        """Return boolean mask where all specified anti-desiderata are violated.
+
+        Args:
+            *anti_desiderata: AntiDesiderataBit values to check (AND logic)
+
+        Returns:
+            Boolean array where True means all specified anti-desiderata violated.
+
+        Example:
+            >>> from vulnstate.constants import AntiDesiderataBit
+            >>> zero_days = arr.where_desiderata_violated(AntiDesiderataBit.U2_X_V)
+            >>> arr[zero_days]  # Filter to zero-day exploits
+        """
+        required = sum(1 << a for a in anti_desiderata)
+        return (self.anti_desiderata_mask & required) == required
+
     @property
     def skill_scores(self) -> np.ndarray:
         """Get skill_scores analytics array.
@@ -1149,7 +1222,9 @@ class CVDArray:
             >>> arr.state_labels  # Announced events only
             array(['VF', 'VF', 'VFDPXA'], dtype=object)
         """
-        return np.array([get_state_label(state_int_to_string(s)) for s in self.state_ints], dtype=object)
+        return np.array(
+            [get_state_label(state_int_to_string(s)) for s in self.state_ints], dtype=object
+        )
 
     def count_by_state(self) -> dict[str, int]:
         """
@@ -1616,7 +1691,10 @@ class CVDArray:
             >>> arr.import_nvd(data["CVE_Items"])
         """
         from vulnstate.io import CVDIO
-        CVDIO.import_nvd(self, source, apply_event, import_metadata, include, exclude, skip_existing)
+
+        CVDIO.import_nvd(
+            self, source, apply_event, import_metadata, include, exclude, skip_existing
+        )
 
     def import_nvd_glob(
         self,
@@ -1647,6 +1725,7 @@ class CVDArray:
             >>> print(f"Loaded from {count} files")
         """
         from vulnstate.io import CVDIO
+
         return CVDIO.import_nvd_glob(
             self, pattern, apply_event, import_metadata, include, exclude, skip_existing
         )

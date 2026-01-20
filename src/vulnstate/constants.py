@@ -260,6 +260,40 @@ COORDINATION_FAILURE_MASK: int = (1 << AntiDesiderataBit.U1_P_V) | (1 << AntiDes
 DEFAULT_XA_SPLIT: float = 0.5  # Equal split between X and A
 DEFAULT_THREAT_MULTIPLIER: float = 1.0  # No multiplier
 
+
+# ==================== DESIDERATA HELPERS ====================
+
+
+def decode_desiderata_mask(mask: int) -> list[DesiderataBit]:
+    """Return list of satisfied desiderata (bits set in mask)."""
+    return [bit for bit in DesiderataBit if mask & (1 << bit)]
+
+
+def decode_anti_desiderata_mask(mask: int) -> list[AntiDesiderataBit]:
+    """Return list of violated anti-desiderata (bits set in mask)."""
+    return [bit for bit in AntiDesiderataBit if mask & (1 << bit)]
+
+
+def get_desiderata_labels(mask: int) -> list[str]:
+    """Return human-readable labels for satisfied desiderata."""
+    return [DESIDERATA_LABELS[bit] for bit in decode_desiderata_mask(mask)]
+
+
+def get_anti_desiderata_labels(mask: int) -> list[str]:
+    """Return human-readable labels for violated anti-desiderata."""
+    return [ANTI_DESIDERATA_LABELS[bit] for bit in decode_anti_desiderata_mask(mask)]
+
+
+def get_desiderata_descriptions(mask: int) -> list[str]:
+    """Return full descriptions for satisfied desiderata."""
+    return [DESIDERATA_DESCRIPTIONS[bit] for bit in decode_desiderata_mask(mask)]
+
+
+def get_anti_desiderata_descriptions(mask: int) -> list[str]:
+    """Return full descriptions for violated anti-desiderata."""
+    return [ANTI_DESIDERATA_DESCRIPTIONS[bit] for bit in decode_anti_desiderata_mask(mask)]
+
+
 # ==================== STATE DIMENSIONS ====================
 #
 # The 6-bit CVD state encodes two independent dimensions:
