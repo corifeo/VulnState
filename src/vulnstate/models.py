@@ -123,7 +123,9 @@ class VulnerabilityEnrichmentData:
     """External enrichment data from EPSS, KEV, NVD, etc."""
 
     epss: Optional[float] = None  # Exploit Prediction Scoring System (0.0-1.0)
+    epss_percentile: Optional[float] = None  # EPSS percentile (0.0-1.0)
     is_kev: bool = False  # CISA Known Exploited Vulnerabilities flag
+    kev_date: Optional[datetime] = None  # Date added to KEV catalog
 
 
 @dataclass

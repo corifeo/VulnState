@@ -17,6 +17,7 @@ import contextlib
 import csv
 import json
 import pickle
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional, Union
 
@@ -159,6 +160,11 @@ class CVDIO:
                     vuln.metadata["kev_notes"] = kev_row["notes"]
                 if "dateAdded" in kev_row:
                     vuln.metadata["kev_date_added"] = kev_row["dateAdded"]
+                    # Store in enrichment as datetime
+                    with contextlib.suppress(ValueError, TypeError):
+                        vuln.enrichment.kev_date = datetime.fromisoformat(
+                            kev_row["dateAdded"]
+                        )
 
                 # Apply event A
                 if apply_event and "dateAdded" in kev_row:
@@ -247,9 +253,11 @@ class CVDIO:
                     elif "score" in metadata_dict:
                         vuln.epss = float(metadata_dict["score"])
 
-                    # Extract percentile to top-level metadata for DataFrame export
+                    # Extract percentile to enrichment and metadata
                     if "percentile" in metadata_dict:
-                        vuln.metadata["epss_percentile"] = float(metadata_dict["percentile"])
+                        percentile = float(metadata_dict["percentile"])
+                        vuln.enrichment.epss_percentile = percentile
+                        vuln.metadata["epss_percentile"] = percentile
                 else:
                     # Just set score (handle both "epss" and "score" keys for backward compatibility)
                     if isinstance(epss_value, float):
@@ -263,7 +271,9 @@ class CVDIO:
 
                     # Also extract percentile if it's a dict
                     if isinstance(epss_value, dict) and "percentile" in epss_value:
-                        vuln.metadata["epss_percentile"] = float(epss_value["percentile"])
+                        percentile = float(epss_value["percentile"])
+                        vuln.enrichment.epss_percentile = percentile
+                        vuln.metadata["epss_percentile"] = percentile
         else:
             # TODO: Handle expunged _vulnerabilities
             pass

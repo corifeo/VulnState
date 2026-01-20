@@ -224,9 +224,19 @@ class CVDArray:
             for v in vulnerabilities
         ], dtype=np.float32)
 
+        self.enrichment.epss_percentile = np.array([
+            v.enrichment.epss_percentile if v.enrichment.epss_percentile is not None else np.nan
+            for v in vulnerabilities
+        ], dtype=np.float32)
+
         self.enrichment.kev = np.array([
             v.enrichment.is_kev for v in vulnerabilities
         ], dtype=bool)
+
+        self.enrichment.kev_date = np.array([
+            np.datetime64(v.enrichment.kev_date) if v.enrichment.kev_date else np.datetime64("NaT")
+            for v in vulnerabilities
+        ], dtype="datetime64[s]")
 
         # Extract EPSS scores from enrichment dataclass
         epss_scores = [
@@ -2076,3 +2086,13 @@ class CVDArray:
     def kev(self) -> np.ndarray:
         """CISA KEV flag."""
         return self.enrichment.kev
+
+    @property
+    def epss_percentile(self) -> np.ndarray:
+        """EPSS percentile scores (0.0-1.0)."""
+        return self.enrichment.epss_percentile
+
+    @property
+    def kev_dates(self) -> np.ndarray:
+        """KEV catalog date added (datetime64[s])."""
+        return self.enrichment.kev_date
