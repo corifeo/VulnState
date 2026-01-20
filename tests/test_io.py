@@ -1020,8 +1020,8 @@ class TestKEVEventApplication:
         # But should be marked as KEV
         assert vuln.kev
 
-    def test_import_kev_with_metadata(self):
-        """KEV import can store full metadata."""
+    def test_import_kev_stores_parsed_metadata(self):
+        """KEV import stores parsed fields with kev_ prefix."""
         arr = CVDArray([CVDVulnerability("CVE-2021-27104")])
 
         kev_data = {
@@ -1032,16 +1032,16 @@ class TestKEVEventApplication:
             }
         }
 
-        arr.import_kev(kev_data, apply_event=True, import_metadata=True)
+        arr.import_kev(kev_data, apply_event=True)
 
         vuln = arr.get(0)
-        assert "kev" in vuln.metadata
-        assert vuln.metadata["kev"]["dateAdded"] == "2021-11-03"
-        assert vuln.metadata["kev"]["vendorProject"] == "Accellion"
-        assert vuln.metadata["kev"]["product"] == "FTA"
+        # KEV fields stored with kev_ prefix
+        assert vuln.metadata["kev_date_added"] == "2021-11-03"
+        assert vuln.metadata["kev_vendor_name"] == "Accellion"
+        assert vuln.metadata["kev_product_name"] == "FTA"
 
-    def test_import_kev_metadata_filtering(self):
-        """KEV import with include/exclude filters."""
+    def test_import_kev_stores_all_available_fields(self):
+        """KEV import extracts all available KEV fields."""
         arr = CVDArray([CVDVulnerability("CVE-2021-27104")])
 
         kev_data = {
@@ -1049,18 +1049,25 @@ class TestKEVEventApplication:
                 "dateAdded": "2021-11-03",
                 "vendorProject": "Accellion",
                 "product": "FTA",
+                "shortDescription": "Test description",
+                "knownRansomwareCampaignUse": "Known",
+                "requiredAction": "Apply update",
+                "dueDate": "2021-12-01",
+                "notes": "Test notes",
             }
         }
 
-        # Include only specific fields
-        arr.import_kev(
-            kev_data, apply_event=True, import_metadata=True, include=["dateAdded", "vendorProject"]
-        )
+        arr.import_kev(kev_data, apply_event=True)
 
         vuln = arr.get(0)
-        assert "dateAdded" in vuln.metadata["kev"]
-        assert "vendorProject" in vuln.metadata["kev"]
-        assert "product" not in vuln.metadata["kev"]
+        assert vuln.metadata["kev_vendor_name"] == "Accellion"
+        assert vuln.metadata["kev_product_name"] == "FTA"
+        assert vuln.metadata["kev_description"] == "Test description"
+        assert vuln.metadata["kev_ransomware_use"] == "Known"
+        assert vuln.metadata["kev_required_action"] == "Apply update"
+        assert vuln.metadata["kev_due_date"] == "2021-12-01"
+        assert vuln.metadata["kev_notes"] == "Test notes"
+        assert vuln.metadata["kev_date_added"] == "2021-11-03"
 
     def test_import_kev_missing_date(self):
         """KEV import handles missing dateAdded gracefully."""
@@ -1465,3 +1472,224 @@ class TestSerializationRoundTrip:
         assert np.array_equal(arr1.is_zero_day_attack, arr2.is_zero_day_attack)
         assert np.array_equal(arr1.has_fix_before_exploit, arr2.has_fix_before_exploit)
         assert np.array_equal(arr1.is_mass_exploitation, arr2.is_mass_exploitation)
+
+
+class TestCPEParser:
+    """Tests for CPE parsing functionality."""
+
+    def test_parse_cpe_extracts_vendor_and_product(self):
+        """CPE parser extracts vendor_id and product_id."""
+        from vulnstate.parsers import parse_cpe
+
+        result = parse_cpe('cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*')
+        assert result['vendor_id'] == 'apache'
+        assert result['product_id'] == 'log4j'
+
+    def test_parse_cpe_handles_os_type(self):
+        """CPE parser handles OS-type CPE strings."""
+        from vulnstate.parsers import parse_cpe
+
+        result = parse_cpe('cpe:2.3:o:microsoft:windows_10:*:*:*:*:*:*:*:*')
+        assert result['vendor_id'] == 'microsoft'
+        assert result['product_id'] == 'windows_10'
+
+    def test_parse_cpe_handles_none(self):
+        """CPE parser returns None values for None input."""
+        from vulnstate.parsers import parse_cpe
+
+        result = parse_cpe(None)
+        assert result['vendor_id'] is None
+        assert result['product_id'] is None
+
+    def test_parse_cpe_handles_invalid_format(self):
+        """CPE parser returns None values for invalid format."""
+        from vulnstate.parsers import parse_cpe
+
+        result = parse_cpe('not-a-cpe-string')
+        assert result['vendor_id'] is None
+        assert result['product_id'] is None
+
+    def test_parse_cpe_handles_wildcard_vendor(self):
+        """CPE parser treats wildcards as None."""
+        from vulnstate.parsers import parse_cpe
+
+        result = parse_cpe('cpe:2.3:a:*:someproduct:1.0:*:*:*:*:*:*:*')
+        assert result['vendor_id'] is None
+        assert result['product_id'] == 'someproduct'
+
+
+class TestNVDMetadataExtraction:
+    """Tests for enhanced NVD metadata extraction."""
+
+    def test_nvd_parser_extracts_description(self):
+        """NVD parser extracts English description."""
+        from vulnstate.parsers import NVDParser
+
+        item = {
+            "cve": {
+                "descriptions": [
+                    {"lang": "en", "value": "Test vulnerability description"}
+                ]
+            }
+        }
+
+        desc = NVDParser.extract_description(item, "2.0")
+        assert desc == "Test vulnerability description"
+
+    def test_nvd_parser_extracts_cwe_ids(self):
+        """NVD parser extracts CWE IDs."""
+        from vulnstate.parsers import NVDParser
+
+        item = {
+            "cve": {
+                "weaknesses": [
+                    {
+                        "description": [
+                            {"value": "CWE-79"},
+                            {"value": "CWE-89"}
+                        ]
+                    }
+                ]
+            }
+        }
+
+        cwe_ids = NVDParser.extract_cwe_ids(item, "2.0")
+        assert cwe_ids == ["CWE-79", "CWE-89"]
+
+    def test_nvd_parser_extracts_severity(self):
+        """NVD parser extracts severity level."""
+        from vulnstate.parsers import NVDParser
+
+        item = {
+            "cve": {
+                "metrics": {
+                    "cvssMetricV31": [
+                        {
+                            "cvssData": {
+                                "baseSeverity": "HIGH"
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+
+        severity = NVDParser.extract_severity(item, "2.0")
+        assert severity == "HIGH"
+
+    def test_nvd_parser_extracts_all_cpes(self):
+        """NVD parser extracts all CPE strings from configurations."""
+        from vulnstate.parsers import NVDParser
+
+        item = {
+            "cve": {
+                "configurations": [
+                    {
+                        "nodes": [
+                            {
+                                "cpeMatch": [
+                                    {"criteria": "cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*"},
+                                    {"criteria": "cpe:2.3:a:apache:struts:2.5.0:*:*:*:*:*:*:*"}
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+
+        cpes = NVDParser.extract_all_cpes(item, "2.0")
+        assert len(cpes) == 2
+        assert "cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*" in cpes
+        assert "cpe:2.3:a:apache:struts:2.5.0:*:*:*:*:*:*:*" in cpes
+
+    def test_nvd_parser_extracts_vendors_products_from_cpes(self):
+        """NVD parser extracts unique vendors and products from CPE strings."""
+        from vulnstate.parsers import NVDParser
+
+        cpes = [
+            "cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*",
+            "cpe:2.3:a:apache:struts:2.5.0:*:*:*:*:*:*:*",
+            "cpe:2.3:a:microsoft:exchange:2019:*:*:*:*:*:*:*"
+        ]
+
+        vendors, products = NVDParser.extract_vendors_products(cpes)
+        assert vendors == ["apache", "microsoft"]  # Sorted, unique
+        assert products == ["exchange", "log4j", "struts"]  # Sorted, unique
+
+    def test_create_vuln_from_item_stores_cpes_in_metadata(self):
+        """create_vuln_from_item stores CPEs and vendor/product lists in metadata."""
+        from vulnstate.parsers import NVDParser
+
+        item = {
+            "cve": {
+                "id": "CVE-2024-12345",
+                "published": "2024-01-15T00:00:00Z",
+                "configurations": [
+                    {
+                        "nodes": [
+                            {
+                                "cpeMatch": [
+                                    {"criteria": "cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*"},
+                                    {"criteria": "cpe:2.3:a:apache:struts:2.5.0:*:*:*:*:*:*:*"}
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+
+        vuln = NVDParser.create_vuln_from_item("CVE-2024-12345", item, "2.0")
+
+        # CPE strings stored as list
+        assert "cpe_strings" in vuln.metadata
+        assert len(vuln.metadata["cpe_strings"]) == 2
+
+        # Vendors and products extracted as lists
+        assert vuln.metadata["vendors"] == ["apache"]  # Unique, sorted
+        assert vuln.metadata["products"] == ["log4j", "struts"]  # Unique, sorted
+
+    def test_create_vuln_from_item_stores_metadata(self):
+        """create_vuln_from_item stores parsed metadata fields."""
+        from vulnstate.parsers import NVDParser
+
+        item = {
+            "cve": {
+                "id": "CVE-2024-12345",
+                "published": "2024-01-15T00:00:00Z",
+                "lastModified": "2024-01-20T00:00:00Z",
+                "descriptions": [
+                    {"lang": "en", "value": "Test description"}
+                ],
+                "weaknesses": [
+                    {"description": [{"value": "CWE-79"}]}
+                ],
+                "metrics": {
+                    "cvssMetricV31": [
+                        {"cvssData": {"baseSeverity": "CRITICAL"}}
+                    ]
+                },
+                "configurations": [
+                    {
+                        "nodes": [
+                            {
+                                "cpeMatch": [
+                                    {"criteria": "cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*"}
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+
+        vuln = NVDParser.create_vuln_from_item("CVE-2024-12345", item, "2.0")
+
+        assert vuln.metadata["description"] == "Test description"
+        assert vuln.metadata["cwe_ids"] == ["CWE-79"]
+        assert vuln.metadata["severity"] == "CRITICAL"
+        assert vuln.metadata["vendors"] == ["apache"]  # List of vendors
+        assert vuln.metadata["products"] == ["log4j"]  # List of products
+        assert vuln.metadata["published_date"] == "2024-01-15T00:00:00Z"
+        assert vuln.metadata["last_modified"] == "2024-01-20T00:00:00Z"

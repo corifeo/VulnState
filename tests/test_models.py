@@ -35,14 +35,6 @@ class TestVulnerabilityIdentity:
         assert len(identity.vuln_id) == 36  # UUID format
         assert identity.cve_id == "CVE-2024-1234"
 
-    def test_vulnerability_identity_vendor_id(self):
-        """VulnerabilityIdentity accepts vendor_id."""
-        from vulnstate.models import VulnerabilityIdentity
-
-        identity = VulnerabilityIdentity(cve_id="CVE-2024-1234", vendor_id="VENDOR-001")
-        assert identity.vendor_id == "VENDOR-001"
-
-
 class TestArrayTimestamps:
     """Tests for ArrayTimestamps dataclass."""
 
@@ -108,10 +100,9 @@ class TestArrayIdentifiers:
         ids = ArrayIdentifiers(
             vuln_id=np.array(["v1", "v2"], dtype=object),
             cve_id=np.array(["CVE-2024-1", "CVE-2024-2"], dtype=object),
-            vendor_id=np.array([None, "Acme"], dtype=object),
         )
         assert ids.cve_id[0] == "CVE-2024-1"
-        assert ids.vendor_id[1] == "Acme"
+        assert ids.vuln_id[1] == "v2"
 
 
 class TestArrayScoring:
@@ -123,13 +114,14 @@ class TestArrayScoring:
 
         n = 3
         scoring = ArrayScoring(
+            cvss_version=np.array(['3.1', '3.1', '3.0'], dtype=object),
             cvss_score=np.array([9.8, 7.5, 4.0], dtype=np.float32),
-            cvss_exploitability=np.array([3.9, 3.0, 2.0], dtype=np.float32),
-            cvss_impact=np.array([5.9, 5.2, 3.6], dtype=np.float32),
-            cvss_vector_int=np.array([0x0FFF, 0x0AAA, 0x0555], dtype=np.uint16),
+            cvss_exploitability_score=np.array([3.9, 3.0, 2.0], dtype=np.float32),
+            cvss_impact_score=np.array([5.9, 5.2, 3.6], dtype=np.float32),
         )
         assert scoring.cvss_score[0] == 9.8
-        assert len(scoring.cvss_impact) == n
+        assert len(scoring.cvss_impact_score) == n
+        assert scoring.cvss_version[0] == '3.1'
 
 
 class TestArrayEnrichment:

@@ -142,14 +142,23 @@ class CVDIO:
                 arr._metadata_raw["is_kev"][i] = True
                 vuln.kev = True
 
-                # Extract key fields to top-level metadata for DataFrame export
-                # This matches the notebook's column naming
+                # Extract parsed KEV fields with kev_ prefix
                 if "vendorProject" in kev_row:
-                    vuln.metadata["vendor"] = kev_row["vendorProject"]
+                    vuln.metadata["kev_vendor_name"] = kev_row["vendorProject"]
                 if "product" in kev_row:
-                    vuln.metadata["product"] = kev_row["product"]
+                    vuln.metadata["kev_product_name"] = kev_row["product"]
                 if "shortDescription" in kev_row:
-                    vuln.metadata["description"] = kev_row["shortDescription"]
+                    vuln.metadata["kev_description"] = kev_row["shortDescription"]
+                if "knownRansomwareCampaignUse" in kev_row:
+                    vuln.metadata["kev_ransomware_use"] = kev_row["knownRansomwareCampaignUse"]
+                if "requiredAction" in kev_row:
+                    vuln.metadata["kev_required_action"] = kev_row["requiredAction"]
+                if "dueDate" in kev_row:
+                    vuln.metadata["kev_due_date"] = kev_row["dueDate"]
+                if "notes" in kev_row:
+                    vuln.metadata["kev_notes"] = kev_row["notes"]
+                if "dateAdded" in kev_row:
+                    vuln.metadata["kev_date_added"] = kev_row["dateAdded"]
 
                 # Apply event A
                 if apply_event and "dateAdded" in kev_row:
@@ -157,20 +166,6 @@ class CVDIO:
                     with contextlib.suppress(ValueError):
                         # Event constraints violated, skip if raised
                         vuln.apply_event(CVDEvent.A, date_added)
-
-                # Store metadata
-                if import_metadata:
-                    metadata_dict = dict(kev_row)
-
-                    # Apply include/exclude filters
-                    if include is not None:
-                        metadata_dict = {k: v for k, v in metadata_dict.items() if k in include}
-                    if exclude is not None:
-                        metadata_dict = {k: v for k, v in metadata_dict.items() if k not in exclude}
-
-                    if "kev" not in vuln.metadata:
-                        vuln.metadata["kev"] = {}
-                    vuln.metadata["kev"].update(metadata_dict)
         else:
             # TODO: Handle expunged _vulnerabilities
             pass

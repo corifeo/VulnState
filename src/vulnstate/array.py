@@ -2021,6 +2021,11 @@ class CVDArray:
         return self.scoring.cvss_score
 
     @property
+    def cve_vectors(self) -> np.ndarray:
+        """CVSS vector strings array (e.g., 'CVSS:3.1/AV:N/AC:L/...')."""
+        return self._metadata_raw.get("cve_vector", np.array([], dtype=object))
+
+    @property
     def attack_vector(self) -> np.ndarray:
         """Attack Vector: N (Network), A (Adjacent), L (Local), P (Physical)."""
         return self.scoring.attack_vector

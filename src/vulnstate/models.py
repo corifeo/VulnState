@@ -74,26 +74,35 @@ class EventMetadata:
 
 @dataclass
 class VulnerabilityIdentity:
-    """Identity information for a vulnerability."""
+    """Identity information for a vulnerability.
+
+    Attributes:
+        vuln_id: Internal UUID, auto-generated if not provided.
+        cve_id: CVE identifier (e.g., 'CVE-2024-12345').
+    """
 
     vuln_id: str = field(default_factory=lambda: str(uuid4()))
     cve_id: Optional[str] = None
-    vendor_id: Optional[str] = None
 
 
 @dataclass
 class VulnerabilityScoringData:
-    """CVSS 3.1 scoring data (parsed from cve_vector during analysis)."""
+    """CVSS scoring data (supports 2.0, 3.0, 3.1, 4.0)."""
+
+    # CVSS version (2.0, 3.0, 3.1, 4.0) - default 3.1
+    cvss_version: Optional[str] = None
 
     # Raw CVSS vector string (e.g., 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H')
     cve_vector: Optional[str] = None
 
-    # CVSS 3.1 Scores (computed from metrics)
+    # CVSS Scores
     cvss_base_score: Optional[float] = None
+    cvss_exploitability_score: Optional[float] = None  # Computed from AV, AC, PR, UI
+    cvss_impact_score: Optional[float] = None  # Computed from C, I, A (and S for 3.x)
     cvss_temporal_score: Optional[float] = None
     cvss_environmental_score: Optional[float] = None
 
-    # CVSS 3.1 Base Metrics (parsed from cve_vector)
+    # CVSS 3.x Base Metrics (parsed from cve_vector)
     attack_vector: Optional[str] = None  # N (Network), A (Adjacent), L (Local), P (Physical)
     attack_complexity: Optional[str] = None  # L (Low), H (High)
     privileges_required: Optional[str] = None  # N (None), L (Low), H (High)
@@ -103,7 +112,7 @@ class VulnerabilityScoringData:
     integrity_impact: Optional[str] = None  # N (None), L (Low), H (High)
     availability_impact: Optional[str] = None  # N (None), L (Low), H (High)
 
-    # CVSS 3.1 Temporal Metrics (optional, parsed from cve_vector)
+    # CVSS 3.x Temporal Metrics (optional, parsed from cve_vector)
     exploit_code_maturity: Optional[str] = None  # X, U, P, F, H
     remediation_level: Optional[str] = None  # X, O, T, W, U
     report_confidence: Optional[str] = None  # X, U, R, C
@@ -124,38 +133,6 @@ class VulnerabilityEventData:
     state_encoded: np.uint8 = field(default_factory=lambda: np.uint8(0))
     events: dict[CVDEvent, Optional[datetime]] = field(default_factory=dict)
     history: list[dict[str, Any]] = field(default_factory=list)
-
-
-@dataclass
-class VulnerabilityAnalytics:
-    """Cached analytics computed from vulnerability state."""
-
-    # Categorical analytics
-    severity: Optional[str] = None  # none, low, medium, high, critical
-    fix_path: int = (
-        0  # FixPath enum value (0=NO_AWARENESS, 1=VENDOR_AWARE, 3=FIX_READY, 7=REMEDIATED)
-    )
-    threat_state: int = 0  # ThreatState enum value
-
-    # Boolean analytics
-    is_zero_day: bool = False
-    is_fix_available: bool = False
-    is_fix_deployed: bool = False
-    is_weaponized: bool = False
-    is_under_attack: bool = False
-    is_premature_disclosure: bool = False
-
-    # Time metrics (days)
-    disclosure_window_days: Optional[float] = None
-    fix_lag_days: Optional[float] = None
-    deployment_lag_days: Optional[float] = None
-
-    # Research tier analytics
-    violated_orderings_count: int = 0
-    desiderata_mask: int = 0  # uint16 bitmask
-    anti_desiderata_mask: int = 0  # uint16 bitmask
-    desiderata_count: int = 0  # Count of satisfied (popcount of mask)
-    skill_score: Optional[float] = None
 
 
 # ==================== ARRAY DATACLASSES ====================
@@ -195,32 +172,37 @@ class ArrayTimestamps:
 
 @dataclass
 class ArrayIdentifiers:
-    """Identifier arrays for vulnerabilities."""
+    """Identifier arrays for vulnerabilities.
+
+    Attributes:
+        vuln_id: Internal UUIDs (object dtype).
+        cve_id: CVE identifiers (object dtype).
+    """
 
     vuln_id: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
     cve_id: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
-    vendor_id: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
 
     def __getitem__(self, key: Any) -> "ArrayIdentifiers":
         """Slice all arrays consistently."""
         return ArrayIdentifiers(
             vuln_id=self.vuln_id[key],
             cve_id=self.cve_id[key],
-            vendor_id=self.vendor_id[key],
         )
 
 
 @dataclass
 class ArrayScoring:
-    """CVSS 3.1 scoring data arrays."""
+    """CVSS scoring data arrays (supports 2.0, 3.0, 3.1, 4.0)."""
 
-    # Scores
+    # CVSS version (object dtype for string '2.0', '3.0', '3.1', '4.0')
+    cvss_version: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
+
+    # CVSS Scores
     cvss_score: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
-    cvss_exploitability: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
-    cvss_impact: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
-    cvss_vector_int: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.uint16))
+    cvss_exploitability_score: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
+    cvss_impact_score: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
 
-    # CVSS 3.1 Base Metrics
+    # CVSS 3.x Base Metrics (parsed from cve_vector)
     attack_vector: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
     attack_complexity: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
     privileges_required: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
@@ -233,10 +215,10 @@ class ArrayScoring:
     def __getitem__(self, key: Any) -> "ArrayScoring":
         """Slice all arrays consistently."""
         return ArrayScoring(
+            cvss_version=self.cvss_version[key],
             cvss_score=self.cvss_score[key],
-            cvss_exploitability=self.cvss_exploitability[key],
-            cvss_impact=self.cvss_impact[key],
-            cvss_vector_int=self.cvss_vector_int[key],
+            cvss_exploitability_score=self.cvss_exploitability_score[key],
+            cvss_impact_score=self.cvss_impact_score[key],
             attack_vector=self.attack_vector[key],
             attack_complexity=self.attack_complexity[key],
             privileges_required=self.privileges_required[key],

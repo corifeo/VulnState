@@ -222,9 +222,141 @@ class NVDParser:
             return str(pub_date) if pub_date is not None else None
 
     @staticmethod
+    def extract_description(item: dict[str, Any], format_version: str) -> Optional[str]:
+        """Extract English description from NVD item."""
+        if format_version == "2.0":
+            descriptions = item.get("cve", {}).get("descriptions", [])
+        else:
+            descriptions = item.get("cve", {}).get("description", {}).get("description_data", [])
+
+        for desc in descriptions:
+            lang = desc.get("lang", "")
+            if lang == "en":
+                return desc.get("value")
+        # Fallback to first description
+        if descriptions:
+            return descriptions[0].get("value")
+        return None
+
+    @staticmethod
+    def extract_cwe_ids(item: dict[str, Any], format_version: str) -> list[str]:
+        """Extract CWE IDs from NVD item."""
+        cwe_ids = []
+
+        if format_version == "2.0":
+            weaknesses = item.get("cve", {}).get("weaknesses", [])
+            for weakness in weaknesses:
+                for desc in weakness.get("description", []):
+                    cwe_id = desc.get("value")
+                    if cwe_id and cwe_id.startswith("CWE-"):
+                        cwe_ids.append(cwe_id)
+        else:
+            problem_types = item.get("cve", {}).get("problemtype", {}).get("problemtype_data", [])
+            for pt in problem_types:
+                for desc in pt.get("description", []):
+                    cwe_id = desc.get("value")
+                    if cwe_id and cwe_id.startswith("CWE-"):
+                        cwe_ids.append(cwe_id)
+
+        return cwe_ids
+
+    @staticmethod
+    def extract_all_cpes(item: dict[str, Any], format_version: str) -> list[str]:
+        """
+        Extract ALL CPE strings from NVD configurations.
+
+        A CVE can affect multiple vendors/products, so we extract all CPEs.
+
+        Args:
+            item: NVD vulnerability item
+            format_version: "1.1" or "2.0"
+
+        Returns:
+            List of CPE 2.3 strings (may be empty)
+        """
+        cpe_strings: list[str] = []
+
+        if format_version == "2.0":
+            configurations = item.get("cve", {}).get("configurations", [])
+            for config in configurations:
+                for node in config.get("nodes", []):
+                    for match in node.get("cpeMatch", []):
+                        criteria = match.get("criteria", "")
+                        if criteria.startswith("cpe:2.3:"):
+                            cpe_strings.append(criteria)
+        else:
+            configurations = item.get("configurations", {})
+            for node in configurations.get("nodes", []):
+                for match in node.get("cpe_match", []):
+                    cpe23 = match.get("cpe23Uri", "")
+                    if cpe23.startswith("cpe:2.3:"):
+                        cpe_strings.append(cpe23)
+
+        return cpe_strings
+
+    @staticmethod
+    def extract_vendors_products(cpe_strings: list[str]) -> tuple[list[str], list[str]]:
+        """
+        Extract unique vendors and products from CPE strings.
+
+        Args:
+            cpe_strings: List of CPE 2.3 strings
+
+        Returns:
+            Tuple of (vendors list, products list) - both unique, sorted
+        """
+        vendors: set[str] = set()
+        products: set[str] = set()
+
+        for cpe in cpe_strings:
+            parsed = parse_cpe(cpe)
+            if parsed['vendor_id']:
+                vendors.add(parsed['vendor_id'])
+            if parsed['product_id']:
+                products.add(parsed['product_id'])
+
+        return sorted(vendors), sorted(products)
+
+    @staticmethod
+    def extract_severity(item: dict[str, Any], format_version: str) -> Optional[str]:
+        """Extract severity level from NVD item."""
+        if format_version == "2.0":
+            metrics = item.get("cve", {}).get("metrics", {})
+            for metric_key in ("cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
+                metric_list = metrics.get(metric_key, [])
+                if metric_list:
+                    cvss_data = metric_list[0].get("cvssData", {})
+                    severity = cvss_data.get("baseSeverity")
+                    if severity:
+                        return severity.upper()
+        else:
+            impact = item.get("impact", {})
+            if "baseMetricV3" in impact:
+                return impact["baseMetricV3"].get("cvssV3", {}).get("baseSeverity", "").upper()
+            if "baseMetricV2" in impact:
+                return impact["baseMetricV2"].get("severity", "").upper()
+        return None
+
+    @staticmethod
+    def extract_last_modified(item: dict[str, Any], format_version: str) -> Optional[str]:
+        """Extract last modified date from NVD item."""
+        if format_version == "2.0":
+            return item.get("cve", {}).get("lastModified")
+        else:
+            return item.get("lastModifiedDate")
+
+    @staticmethod
     def create_vuln_from_item(cve_id: str, item: dict[str, Any], format_version: str = "1.1") -> "CVDVulnerability":
         """
         Create a CVDVulnerability from an NVD item.
+
+        Extracts all parseable fields from the NVD item:
+        - cvss_score, cve_vector: CVSS data (stored in scoring)
+        - cpe_strings, vendors, products: From CPE (stored in metadata as lists)
+        - description, cwe_ids, severity, published_date, last_modified: Parsed metadata
+
+        Note: A CVE can affect multiple vendors/products, so these are stored as
+        lists in metadata rather than single values.
 
         Args:
             cve_id: CVE identifier
@@ -232,26 +364,56 @@ class NVDParser:
             format_version: "1.1" or "2.0"
 
         Returns:
-            CVDVulnerability instance
+            CVDVulnerability instance with all extracted data
         """
         from .vulnerability import CVDVulnerability
 
         vuln = CVDVulnerability(cve_id)
 
-        # Extract CVSS score and vector using format-aware helper
+        # Extract CVSS score and vector
         cvss_score, cvss_vector = NVDParser.extract_cvss(item, format_version)
         vuln.cvss_score = cvss_score
         vuln.cve_vector = cvss_vector
 
-        # Extract published date as P event
+        # Extract ALL CPEs and derive vendor/product lists
+        cpe_strings = NVDParser.extract_all_cpes(item, format_version)
+        if cpe_strings:
+            vuln.metadata["cpe_strings"] = cpe_strings
+            vendors, products = NVDParser.extract_vendors_products(cpe_strings)
+            if vendors:
+                vuln.metadata["vendors"] = vendors
+            if products:
+                vuln.metadata["products"] = products
+
+        # Extract description
+        description = NVDParser.extract_description(item, format_version)
+        if description:
+            vuln.metadata["description"] = description
+
+        # Extract CWE IDs
+        cwe_ids = NVDParser.extract_cwe_ids(item, format_version)
+        if cwe_ids:
+            vuln.metadata["cwe_ids"] = cwe_ids
+
+        # Extract severity
+        severity = NVDParser.extract_severity(item, format_version)
+        if severity:
+            vuln.metadata["severity"] = severity
+
+        # Extract published date and apply P event
         published_date = NVDParser.extract_published_date(item, format_version)
         if published_date:
+            vuln.metadata["published_date"] = published_date
             try:
-                # NVD format: "2024-01-15T12:00:00Z" or "2024-01-15T12:00:00.627"
                 dt = datetime.fromisoformat(published_date.replace("Z", "+00:00"))
                 vuln.apply_event(CVDEvent.P, timestamp=dt)
             except (ValueError, TypeError):
                 pass
+
+        # Extract last modified date
+        last_modified = NVDParser.extract_last_modified(item, format_version)
+        if last_modified:
+            vuln.metadata["last_modified"] = last_modified
 
         return vuln
 
@@ -538,3 +700,81 @@ class NVDParser:
             vulns.append(vuln)
 
         return CVDArray(vulns)
+
+
+def parse_cpe(cpe_string: Optional[str]) -> dict[str, Optional[str]]:
+    """
+    Parse CPE 2.3 string to extract vendor and product identifiers.
+
+    CPE 2.3 format: cpe:2.3:part:vendor:product:version:update:edition:language:sw_edition:target_sw:target_hw:other
+
+    Args:
+        cpe_string: CPE 2.3 formatted string or None
+
+    Returns:
+        Dict with 'vendor_id' and 'product_id' keys (values may be None)
+
+    Examples:
+        >>> parse_cpe('cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*')
+        {'vendor_id': 'apache', 'product_id': 'log4j'}
+
+        >>> parse_cpe('cpe:2.3:o:microsoft:windows_10:*:*:*:*:*:*:*:*')
+        {'vendor_id': 'microsoft', 'product_id': 'windows_10'}
+
+        >>> parse_cpe(None)
+        {'vendor_id': None, 'product_id': None}
+    """
+    result: dict[str, Optional[str]] = {'vendor_id': None, 'product_id': None}
+
+    if not cpe_string or not isinstance(cpe_string, str):
+        return result
+
+    try:
+        # CPE 2.3 format: cpe:2.3:part:vendor:product:version:...
+        parts = cpe_string.split(':')
+
+        # Validate CPE 2.3 format
+        if len(parts) < 5 or parts[0] != 'cpe' or parts[1] != '2.3':
+            return result
+
+        vendor = parts[3] if len(parts) > 3 else None
+        product = parts[4] if len(parts) > 4 else None
+
+        # Filter out wildcards and empty values
+        if vendor and vendor not in ('*', '-', ''):
+            result['vendor_id'] = vendor
+        if product and product not in ('*', '-', ''):
+            result['product_id'] = product
+
+    except Exception:
+        # Invalid format, return None values
+        pass
+
+    return result
+
+
+def extract_cpe_from_configurations(configurations: list[dict[str, Any]]) -> Optional[str]:
+    """
+    Extract first CPE string from NVD configurations.
+
+    NVD 2.0 format nests CPE strings in configurations[].nodes[].cpeMatch[].criteria
+
+    Args:
+        configurations: NVD configurations array
+
+    Returns:
+        First CPE string found, or None
+    """
+    if not configurations:
+        return None
+
+    for config in configurations:
+        nodes = config.get('nodes', [])
+        for node in nodes:
+            cpe_matches = node.get('cpeMatch', [])
+            for match in cpe_matches:
+                criteria = match.get('criteria')
+                if criteria and criteria.startswith('cpe:2.3:'):
+                    return criteria
+
+    return None
