@@ -272,6 +272,27 @@ class CVDArray:
         self.core.vuln_ids = value
 
     @property
+    def cve_ids(self) -> np.ndarray:
+        """
+        Get CVE identifiers array.
+
+        Primary identifier for vulnerabilities. Users select and filter
+        vulnerabilities by CVE ID.
+
+        Returns:
+            Array of CVE ID strings (object dtype). None values for
+            vulnerabilities without CVE IDs.
+
+        Examples:
+            >>> arr.cve_ids
+            array(['CVE-2024-001', 'CVE-2024-002', None], dtype=object)
+
+            >>> mask = arr.cve_ids == 'CVE-2024-001'
+            >>> critical = arr[mask]
+        """
+        return self._metadata_raw.get("_cve_id", np.array([], dtype=object))
+
+    @property
     def _vulnerabilities(self) -> np.ndarray:
         """Get live vulnerability objects array."""
         return self.core.vulnerabilities
@@ -310,6 +331,30 @@ class CVDArray:
     def A_timestamps(self) -> np.ndarray:
         """Get A event timestamps."""
         return self.timestamps.A
+
+    @property
+    def events(self) -> dict[CVDEvent, np.ndarray]:
+        """
+        Get event timestamp arrays as dict (matches CVDVulnerability.events pattern).
+
+        Returns dict mapping each event to its timestamp array.
+        Equivalent to accessing V_timestamps, F_timestamps, etc. individually.
+
+        Returns:
+            Dict mapping CVDEvent to np.ndarray of datetime64[us] timestamps
+
+        Examples:
+            >>> arr.events[CVDEvent.V]  # Same as arr.V_timestamps
+            >>> arr.events[CVDEvent.P]  # Same as arr.P_timestamps
+        """
+        return {
+            CVDEvent.V: self.V_timestamps,
+            CVDEvent.F: self.F_timestamps,
+            CVDEvent.D: self.D_timestamps,
+            CVDEvent.P: self.P_timestamps,
+            CVDEvent.X: self.X_timestamps,
+            CVDEvent.A: self.A_timestamps,
+        }
 
     @property
     def severities(self) -> np.ndarray:
