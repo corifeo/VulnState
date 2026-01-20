@@ -141,9 +141,9 @@ class CVDArray:
         self.analytics.is_zero_day = np.zeros(n, dtype=bool)
         self.analytics.is_fix_available = np.zeros(n, dtype=bool)
         self.analytics.is_fix_deployed = np.zeros(n, dtype=bool)
-        self.analytics.has_public_exploit = np.zeros(n, dtype=bool)
+        self.analytics.is_weaponized = np.zeros(n, dtype=bool)
         self.analytics.is_under_attack = np.zeros(n, dtype=bool)
-        self.analytics.premature_disclosure = np.zeros(n, dtype=bool)
+        self.analytics.is_premature_disclosure = np.zeros(n, dtype=bool)
         self.analytics.disclosure_window_days = np.full(n, np.nan, dtype=np.float32)
         self.analytics.fix_lag_days = np.full(n, np.nan, dtype=np.float32)
         self.analytics.deployment_lag_days = np.full(n, np.nan, dtype=np.float32)
@@ -336,14 +336,6 @@ class CVDArray:
         return self.analysis.threat_state_int
 
     @property
-    def cubes(self) -> np.ndarray:
-        """Deprecated: Use fix_path instead."""
-        import warnings
-
-        warnings.warn("cubes is deprecated, use fix_path", DeprecationWarning, stacklevel=2)
-        return self.fix_path
-
-    @property
     def is_zero_day(self) -> np.ndarray:
         """Get is_zero_day analytics array.
 
@@ -369,7 +361,7 @@ class CVDArray:
         return self.has_event_occurred(CVDEvent.D)
 
     @property
-    def has_public_exploit(self) -> np.ndarray:
+    def is_weaponized(self) -> np.ndarray:
         """Check if public exploit exists (X event occurred).
 
         Reads from AnalysisResult.is_weaponized computed by CVDAnalyzer.
@@ -385,7 +377,7 @@ class CVDArray:
         return self.has_event_occurred(CVDEvent.A)
 
     @property
-    def premature_disclosure(self) -> np.ndarray:
+    def is_premature_disclosure(self) -> np.ndarray:
         """Get premature_disclosure analytics array.
 
         Reads from AnalysisResult.is_premature_disclosure computed by CVDAnalyzer.
@@ -495,32 +487,6 @@ class CVDArray:
     def size(self) -> int:
         """Total number of elements (numpy convention)."""
         return len(self)
-
-    @property
-    def event_timestamps(self) -> dict[CVDEvent, np.ndarray]:
-        """
-        DEPRECATED: Use exploded timestamp arrays instead.
-
-        .. deprecated:: 2026-01-13
-            Use direct array access instead:
-            - arr.V_timestamps instead of arr.event_timestamps[CVDEvent.V]
-            - arr.F_timestamps instead of arr.event_timestamps[CVDEvent.F]
-            - arr.D_timestamps instead of arr.event_timestamps[CVDEvent.D]
-            - arr.P_timestamps instead of arr.event_timestamps[CVDEvent.P]
-            - arr.X_timestamps instead of arr.event_timestamps[CVDEvent.X]
-            - arr.A_timestamps instead of arr.event_timestamps[CVDEvent.A]
-
-        Returns:
-            Dict[CVDEvent, np.ndarray] with absolute datetime64[us] arrays.
-        """
-        warnings.warn(
-            "event_timestamps dict is deprecated. Use exploded timestamp arrays "
-            "(V_timestamps, F_timestamps, D_timestamps, P_timestamps, "
-            "X_timestamps, A_timestamps) instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self._event_timestamps_absolute
 
     @property
     def metadata(self) -> dict[str, np.ndarray]:

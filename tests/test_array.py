@@ -520,12 +520,12 @@ class TestMetadataArrays:
         vuln1 = CVDVulnerability("CVE-2024-001")
         vuln1.cvss_score = 9.8
         vuln1.epss = 0.85
-        vuln1.is_kev = True
+        vuln1.kev = True
 
         vuln2 = CVDVulnerability("CVE-2024-002")
         vuln2.cvss_score = 4.3
         vuln2.epss = 0.12
-        vuln2.is_kev = False
+        vuln2.kev = False
 
         return CVDArray([vuln1, vuln2])
 

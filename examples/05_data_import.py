@@ -177,7 +177,7 @@ def section_3_kev_enrichment():
     # Show results
     console.print()
     console.print("[bold]KEV Status:[/bold]")
-    kev_count = sum(1 for i in range(len(arr)) if arr.get(i).is_kev)
+    kev_count = sum(1 for i in range(len(arr)) if arr.get(i).kev)
     console.print(f"  Marked as KEV: {kev_count} of {len(arr)}")
     console.print()
 
@@ -191,7 +191,7 @@ def section_3_kev_enrichment():
     shown = 0
     for i in range(len(arr)):
         vuln = arr.get(i)
-        if vuln.is_kev and shown < 5:
+        if vuln.kev and shown < 5:
             table.add_row(
                 vuln.cve_id,
                 vuln.state,
@@ -236,7 +236,7 @@ def section_4_combined_enrichment():
     console.print("[yellow]Step 3: Mark KEV entries...[/yellow]")
     kev_data = {f"CVE-2024-{i:05d}": {"dateAdded": "2024-01-20"} for i in range(0, 50, 7)}
     arr.import_kev(kev_data)
-    kev_count = sum(1 for i in range(len(arr)) if arr.get(i).is_kev)
+    kev_count = sum(1 for i in range(len(arr)) if arr.get(i).kev)
     console.print(f"  Marked {kev_count} KEV entries")
 
     # Step 4: Analysis
@@ -264,11 +264,11 @@ def section_4_combined_enrichment():
     for i in range(len(arr)):
         vuln = arr.get(i)
         epss = vuln.epss or 0.0
-        if vuln.is_kev or epss > 0.5:
+        if vuln.kev or epss > 0.5:
             priority_vulns.append((vuln, epss))
 
     for vuln, epss in sorted(priority_vulns, key=lambda x: -x[1])[:8]:
-        kev_status = "[red]YES[/red]" if vuln.is_kev else "[dim]no[/dim]"
+        kev_status = "[red]YES[/red]" if vuln.kev else "[dim]no[/dim]"
         table.add_row(
             vuln.cve_id,
             f"{vuln.cvss_score:.1f}",
@@ -324,7 +324,7 @@ def section_4b_dimension_based_filtering():
     priority = []
     for i in range(len(arr)):
         vuln = arr.get(i)
-        if vuln.is_kev and vuln.threat_state >= ThreatState.WEAPONIZED:
+        if vuln.kev and vuln.threat_state >= ThreatState.WEAPONIZED:
             priority.append(vuln)
 
     console.print(f"  KEV entries with weaponized threat: {len(priority)}")

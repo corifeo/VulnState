@@ -115,7 +115,7 @@ def test_analyzer_validity_impossible():
     vuln.apply_event(CVDEvent.V, timestamp=base + timedelta(days=10))  # V later
     # Can't apply F before V normally, so modify timestamps directly
     vuln.events[CVDEvent.F] = base  # F earlier (impossible)
-    vuln.state_encoded |= 1 << 1  # Set F bit
+    vuln.event_data.state_encoded |= 1 << 1  # Set F bit
 
     arr = CVDArray([vuln])
     analyzer = CVDAnalyzer(arr)
@@ -157,7 +157,7 @@ def test_analyzer_infer_v_from_f():
     # Create vuln with F but no V (impossible to do normally, simulate import)
     vuln = CVDVulnerability()
     vuln.events[CVDEvent.F] = datetime(2024, 1, 15)
-    vuln.state_encoded |= 1 << 1  # Set F bit
+    vuln.event_data.state_encoded |= 1 << 1  # Set F bit
 
     arr = CVDArray([vuln])
     arr.timestamps.F[0] = np.datetime64(datetime(2024, 1, 15), "us")
@@ -373,7 +373,7 @@ def test_explain_pair_violations_with_analyzer():
     vuln = CVDVulnerability()
     vuln.apply_event(CVDEvent.V, timestamp=base + timedelta(days=10))
     vuln.events[CVDEvent.F] = base  # F before V (impossible)
-    vuln.state_encoded |= 1 << 1
+    vuln.event_data.state_encoded |= 1 << 1
 
     arr = CVDArray([vuln])
     analyzer = CVDAnalyzer(arr)

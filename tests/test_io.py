@@ -166,8 +166,8 @@ class TestEnrichment:
 
         CVDIO.import_kev(arr, kev_data, apply_event=False)
 
-        assert arr[0].is_kev == True  # noqa: E712
-        assert arr[1].is_kev == False  # noqa: E712
+        assert arr[0].kev == True  # noqa: E712
+        assert arr[1].kev == False  # noqa: E712
 
 
 class TestNVDImport:
@@ -721,9 +721,9 @@ class TestKEVFileImport:
         CVDIO.import_kev(arr, kev_file)
 
         # Verify KEV flags were set
-        assert arr[0].is_kev is True  # CVE-2021-44228
-        assert arr[1].is_kev is True  # CVE-2024-001
-        assert arr[2].is_kev is False  # CVE-2024-002 not in KEV
+        assert arr[0].kev is True  # CVE-2021-44228
+        assert arr[1].kev is True  # CVE-2024-001
+        assert arr[2].kev is False  # CVE-2024-002 not in KEV
 
     def test_import_kev_file_convenience_method(self):
         """Test CVDArray convenience wrapper for KEV import."""
@@ -737,8 +737,8 @@ class TestKEVFileImport:
         kev_file = os.path.join(DATA_DIR, "kev_sample.csv")
         arr.import_kev(kev_file)
 
-        assert arr[0].is_kev is True
-        assert arr[1].is_kev is True
+        assert arr[0].kev is True
+        assert arr[1].kev is True
 
 
 class TestNVDFileImport:
@@ -829,17 +829,17 @@ class TestIntegratedWorkflow:
 
         # Verify CVE-2024-001 has all three enrichments
         assert arr[0].epss == pytest.approx(0.85432)
-        assert arr[0].is_kev is True
+        assert arr[0].kev is True
         assert arr[0].cvss_score == 6.1
 
         # Verify CVE-2024-002 has EPSS and NVD but not KEV
         assert arr[1].epss == pytest.approx(0.42156)
-        assert arr[1].is_kev is False
+        assert arr[1].kev is False
         assert arr[1].cvss_score == 9.8
 
         # Verify CVE-2024-003 has EPSS and KEV but not NVD
         assert arr[2].epss == pytest.approx(0.12345)
-        assert arr[2].is_kev is True
+        assert arr[2].kev is True
         assert arr[2].cvss_score is None  # Not in NVD sample
 
 
@@ -1018,7 +1018,7 @@ class TestKEVEventApplication:
         # Should not have event A
         assert not vuln.has_event_occurred(CVDEvent.A)
         # But should be marked as KEV
-        assert vuln.is_kev
+        assert vuln.kev
 
     def test_import_kev_with_metadata(self):
         """KEV import can store full metadata."""
@@ -1075,7 +1075,7 @@ class TestKEVEventApplication:
         # Should not have event A since dateAdded is missing
         assert not vuln.has_event_occurred(CVDEvent.A)
         # But should still be marked as KEV
-        assert vuln.is_kev
+        assert vuln.kev
 
     def test_import_epss_stores_metadata(self):
         """EPSS import stores full metadata when import_metadata=True."""

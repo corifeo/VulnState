@@ -138,7 +138,7 @@ class CVDIO:
 
                 # Set is_kev flag
                 arr._metadata_raw["is_kev"][i] = True
-                vuln.is_kev = True
+                vuln.kev = True
 
                 # Extract key fields to top-level metadata for DataFrame export
                 # This matches the notebook's column naming
@@ -533,9 +533,9 @@ class CVDIO:
             for i in range(len(arr)):
                 df.loc[i, "is_fix_available"] = arr.is_fix_available[i]
                 df.loc[i, "is_fix_deployed"] = arr.is_fix_deployed[i]
-                df.loc[i, "has_public_exploit"] = arr.has_public_exploit[i]
+                df.loc[i, "is_weaponized"] = arr.is_weaponized[i]
                 df.loc[i, "is_under_attack"] = arr.is_under_attack[i]
-                df.loc[i, "premature_disclosure"] = arr.premature_disclosure[i]
+                df.loc[i, "is_premature_disclosure"] = arr.is_premature_disclosure[i]
                 df.loc[i, "disclosure_window_days"] = arr.disclosure_window_days[i]
                 df.loc[i, "fix_lag_days"] = arr.fix_lag_days[i]
                 df.loc[i, "deployment_lag_days"] = arr.deployment_lag_days[i]
@@ -634,7 +634,7 @@ class CVDIO:
             "cvss_score": vuln.cvss_score,
             "epss": vuln.epss,
             "cve_vector": vuln.cve_vector,
-            "is_kev": vuln.is_kev,
+            "is_kev": vuln.kev,
             "event_timestamps": {
                 event.name: (
                     None

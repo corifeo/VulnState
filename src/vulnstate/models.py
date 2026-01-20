@@ -138,9 +138,9 @@ class VulnerabilityAnalytics:
     is_zero_day: bool = False
     is_fix_available: bool = False
     is_fix_deployed: bool = False
-    has_public_exploit: bool = False
+    is_weaponized: bool = False
     is_under_attack: bool = False
-    premature_disclosure: bool = False
+    is_premature_disclosure: bool = False
 
     # Time metrics (days)
     disclosure_window_days: Optional[float] = None
@@ -522,9 +522,9 @@ class ArrayAnalytics:
     is_zero_day: np.ndarray = field(default_factory=lambda: np.array([], dtype=bool))
     is_fix_available: np.ndarray = field(default_factory=lambda: np.array([], dtype=bool))
     is_fix_deployed: np.ndarray = field(default_factory=lambda: np.array([], dtype=bool))
-    has_public_exploit: np.ndarray = field(default_factory=lambda: np.array([], dtype=bool))
+    is_weaponized: np.ndarray = field(default_factory=lambda: np.array([], dtype=bool))
     is_under_attack: np.ndarray = field(default_factory=lambda: np.array([], dtype=bool))
-    premature_disclosure: np.ndarray = field(default_factory=lambda: np.array([], dtype=bool))
+    is_premature_disclosure: np.ndarray = field(default_factory=lambda: np.array([], dtype=bool))
 
     # Numeric metrics (float32 for memory efficiency)
     disclosure_window_days: np.ndarray = field(
