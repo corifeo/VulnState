@@ -211,10 +211,21 @@ class ArrayIdentifiers:
 class ArrayScoring:
     """CVSS 3.1 scoring data arrays."""
 
+    # Scores
     cvss_score: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
     cvss_exploitability: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
     cvss_impact: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
     cvss_vector_int: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.uint16))
+
+    # CVSS 3.1 Base Metrics
+    attack_vector: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
+    attack_complexity: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
+    privileges_required: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
+    user_interaction: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
+    scope: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
+    confidentiality_impact: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
+    integrity_impact: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
+    availability_impact: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
 
     def __getitem__(self, key: Any) -> "ArrayScoring":
         """Slice all arrays consistently."""
@@ -223,6 +234,14 @@ class ArrayScoring:
             cvss_exploitability=self.cvss_exploitability[key],
             cvss_impact=self.cvss_impact[key],
             cvss_vector_int=self.cvss_vector_int[key],
+            attack_vector=self.attack_vector[key],
+            attack_complexity=self.attack_complexity[key],
+            privileges_required=self.privileges_required[key],
+            user_interaction=self.user_interaction[key],
+            scope=self.scope[key],
+            confidentiality_impact=self.confidentiality_impact[key],
+            integrity_impact=self.integrity_impact[key],
+            availability_impact=self.availability_impact[key],
         )
 
 
@@ -243,6 +262,112 @@ class ArrayEnrichment:
             kev=self.kev[key],
             kev_date=self.kev_date[key],
         )
+
+
+@dataclass
+class ArrayHistories:
+    """
+    History data for all vulnerabilities (1D with offsets - compact storage).
+
+    Stores all history entries concatenated into 1D arrays with offset indices.
+    This is the most memory-efficient format for variable-length histories.
+
+    Each vulnerability has a variable number of history entries. All entries are
+    concatenated into flat 1D arrays, with offsets[i] marking where vuln i's
+    history starts.
+    """
+
+    # 1D arrays of all history entries concatenated
+    events: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.int8))  # CVDEvent as int (-1 for None)
+    from_states: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.uint8))  # State as int (255 for INIT)
+    to_states: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.uint8))  # State as int (255 for None)
+    timestamps: np.ndarray = field(default_factory=lambda: np.array([], dtype="datetime64[us]"))
+
+    # Offset array: offsets[i] = start index in 1D arrays for vuln i's history
+    # offsets[i+1] - offsets[i] = number of history entries for vuln i
+    offsets: np.ndarray = field(default_factory=lambda: np.array([0], dtype=np.int32))
+
+    def get_history(self, idx: int) -> dict[str, np.ndarray]:
+        """
+        Get history for a single vulnerability.
+
+        Args:
+            idx: Vulnerability index
+
+        Returns:
+            Dict with 'events', 'from_states', 'to_states', 'timestamps' as arrays
+        """
+        if idx < 0 or idx >= len(self.offsets) - 1:
+            return {
+                'events': np.array([], dtype=np.int8),
+                'from_states': np.array([], dtype=np.uint8),
+                'to_states': np.array([], dtype=np.uint8),
+                'timestamps': np.array([], dtype="datetime64[us]")
+            }
+
+        start = self.offsets[idx]
+        end = self.offsets[idx + 1]
+
+        return {
+            'events': self.events[start:end],
+            'from_states': self.from_states[start:end],
+            'to_states': self.to_states[start:end],
+            'timestamps': self.timestamps[start:end]
+        }
+
+    def __getitem__(self, key: int) -> dict[str, np.ndarray]:
+        """Get history for vulnerability at index."""
+        return self.get_history(key)
+
+    def __len__(self) -> int:
+        """Get number of vulnerabilities with history data."""
+        return len(self.offsets) - 1 if len(self.offsets) > 0 else 0
+
+
+@dataclass
+class ArrayEventOrders:
+    """
+    Event chronological orders for all vulnerabilities (1D with offsets).
+
+    Stores the order in which events occurred for each vulnerability.
+    Uses 1D array with offsets for compact storage of variable-length orders.
+
+    Each vulnerability has a variable number of events. All event orders are
+    concatenated into a flat 1D array, with offsets[i] marking where vuln i's
+    event order starts.
+    """
+
+    # 1D array of all events in chronological order (concatenated)
+    events: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.int8))  # CVDEvent as int
+
+    # Offset array: offsets[i] = start index for vuln i's event order
+    # offsets[i+1] - offsets[i] = number of events for vuln i
+    offsets: np.ndarray = field(default_factory=lambda: np.array([0], dtype=np.int32))
+
+    def get_order(self, idx: int) -> np.ndarray:
+        """
+        Get event order for a single vulnerability.
+
+        Args:
+            idx: Vulnerability index
+
+        Returns:
+            Array of CVDEvent values in chronological order
+        """
+        if idx < 0 or idx >= len(self.offsets) - 1:
+            return np.array([], dtype=np.int8)
+
+        start = self.offsets[idx]
+        end = self.offsets[idx + 1]
+        return self.events[start:end]
+
+    def __getitem__(self, key: int) -> np.ndarray:
+        """Get event order for vulnerability at index."""
+        return self.get_order(key)
+
+    def __len__(self) -> int:
+        """Get number of vulnerabilities with event order data."""
+        return len(self.offsets) - 1 if len(self.offsets) > 0 else 0
 
 
 @dataclass

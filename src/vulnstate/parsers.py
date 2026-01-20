@@ -158,6 +158,46 @@ class NVDParser:
         return None, None
 
     @staticmethod
+    def parse_cvss_vector(vector: Optional[str]) -> dict[str, Optional[str]]:
+        """
+        Parse CVSS 3.1 vector string to extract base metrics.
+
+        Simple parser for CVSS 3.1 format: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+
+        Note: This is a minimal implementation for CVSS 3.1 base metrics only.
+        For full CVSS 2.0/3.0/3.1/4.0 support with temporal and environmental metrics,
+        consider using a dedicated library like 'cvsslib'.
+
+        Args:
+            vector: CVSS vector string or None
+
+        Returns:
+            Dict with keys: AV, AC, PR, UI, S, C, I, A
+            Values are single-letter codes or None if not present/parseable
+        """
+        result = {
+            'AV': None, 'AC': None, 'PR': None, 'UI': None,
+            'S': None, 'C': None, 'I': None, 'A': None
+        }
+
+        if not vector or not isinstance(vector, str):
+            return result
+
+        # Parse format: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+        try:
+            parts = vector.split('/')
+            for part in parts[1:]:  # Skip "CVSS:3.1"
+                if ':' in part:
+                    key, value = part.split(':', 1)
+                    if key in result:
+                        result[key] = value
+        except Exception:
+            # Invalid format, return all None
+            pass
+
+        return result
+
+    @staticmethod
     def extract_published_date(item: dict[str, Any], format_version: str) -> Optional[str]:
         """
         Extract published date from NVD item based on format version.
