@@ -47,6 +47,7 @@ from .models import (
     ArrayMetadata,
     ArrayScoring,
     ArrayTimestamps,
+    compute_history_id,
     compute_pair_mask,
 )
 from .vulnerability import CVDVulnerability
@@ -111,8 +112,9 @@ class CVDArray:
         # Analysis cache (computed on first access)
         self._analysis_cache: Optional[AnalysisResult] = None
 
-        # Bitmask dirty tracking (recompute pair_mask when timestamps change)
+        # Bitmask dirty tracking (recompute pair_mask/history_id when timestamps change)
         self._pair_mask_dirty = True
+        self._history_id_dirty = True
 
         # Fixed-size semantics
         self._fixed_size = fixed_size
@@ -439,6 +441,54 @@ class CVDArray:
             self._pair_mask_dirty = False
 
         return self.bitmasks.pair_mask
+
+    @property
+    def history_id(self) -> np.ndarray:
+        """
+        Get history IDs for complete disclosure histories (0-69, or 255 for incomplete).
+
+        For vulnerabilities where all 6 events (V, F, D, P, X, A) occurred,
+        returns the canonical index (0-69) into VALID_HISTORIES based on
+        the chronological ordering of events.
+
+        For incomplete histories (fewer than 6 events), returns 255.
+
+        Computed lazily and cached. Recomputed when timestamps change (after sync()).
+
+        Returns:
+            np.ndarray[uint8]: History ID array
+                - 0: AXPVFD (worst case - attacks first)
+                - 69: VFDPXA (perfect CVD)
+                - 255: Incomplete history
+
+        Examples:
+            >>> # Find all perfect CVD disclosures
+            >>> perfect = arr[arr.history_id == 69]
+
+            >>> # Filter to only complete histories for analysis
+            >>> complete = arr[arr.history_id != 255]
+
+        See:
+            - vulnstate.constants.VALID_HISTORIES for full list
+            - docs/ref/cvd-histories.md for interpretation
+        """
+        if self._history_id_dirty or len(self.bitmasks.history_id) != len(self):
+            # Create ArrayCVDState from existing data (source of truth)
+            cvd_state = ArrayCVDState(
+                states=self.state_ints,
+                V_timestamps=self.V_timestamps,
+                F_timestamps=self.F_timestamps,
+                D_timestamps=self.D_timestamps,
+                P_timestamps=self.P_timestamps,
+                X_timestamps=self.X_timestamps,
+                A_timestamps=self.A_timestamps,
+            )
+
+            # Compute history_id from source data
+            self.bitmasks.history_id = compute_history_id(cvd_state)
+            self._history_id_dirty = False
+
+        return self.bitmasks.history_id
 
     @property
     def severities(self) -> np.ndarray:
@@ -1229,9 +1279,10 @@ class CVDArray:
         # Clear dirty flags
         self._dirty_indices -= to_sync
 
-        # Mark pair_mask as dirty (timestamps changed)
+        # Mark bitmasks as dirty (timestamps changed)
         if to_sync:
             self._pair_mask_dirty = True
+            self._history_id_dirty = True
 
         return self
 

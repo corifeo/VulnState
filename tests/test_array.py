@@ -1549,5 +1549,273 @@ class TestPropertyConsistency:
         assert arr.is_mass_exploitation[1]
 
 
+class TestPairMaskAndHistoryId:
+    """Test pair_mask and history_id bitmask analytics."""
+
+    def test_pair_mask_basic(self):
+        """Verify pair_mask returns uint16 array."""
+        arr = CVDArray.random(10, seed=42)
+
+        mask = arr.pair_mask
+        assert isinstance(mask, np.ndarray)
+        assert mask.dtype == np.uint16
+        assert len(mask) == 10
+
+    def test_pair_mask_coordinated_disclosure(self):
+        """Verify pair_mask bit 2 (V≺P) is set for coordinated disclosure."""
+        from datetime import datetime, timedelta
+        base = datetime(2024, 1, 1)
+
+        # Coordinated: V before P
+        v = CVDVulnerability('CVE-2024-001')
+        v.apply_event(CVDEvent.V, timestamp=base)
+        v.apply_event(CVDEvent.P, timestamp=base + timedelta(days=10))
+
+        arr = CVDArray([v])
+        arr.sync()
+
+        # Bit 2 = V≺P should be set
+        assert (arr.pair_mask[0] & (1 << 2)) != 0
+
+    def test_pair_mask_uncoordinated_disclosure(self):
+        """Verify pair_mask bit 2 (V≺P) is clear for uncoordinated disclosure."""
+        from datetime import datetime, timedelta
+        base = datetime(2024, 1, 1)
+
+        # Uncoordinated: P before V
+        v = CVDVulnerability('CVE-2024-001')
+        v.apply_event(CVDEvent.P, timestamp=base)
+        v.apply_event(CVDEvent.V, timestamp=base + timedelta(days=10))
+
+        arr = CVDArray([v])
+        arr.sync()
+
+        # Bit 2 = V≺P should be clear (P came first)
+        assert (arr.pair_mask[0] & (1 << 2)) == 0
+
+    def test_pair_mask_simultaneous_events_treated_as_not_satisfied(self):
+        """Verify simultaneous events are treated as 'not satisfied' (bit clear)."""
+        from datetime import datetime
+        base = datetime(2024, 1, 1)
+
+        # V and P at exact same timestamp
+        v = CVDVulnerability('CVE-2024-001')
+        v.apply_event(CVDEvent.V, timestamp=base)
+        v.apply_event(CVDEvent.P, timestamp=base)  # Same timestamp!
+
+        arr = CVDArray([v])
+        arr.sync()
+
+        # Bit 2 = V≺P should be clear (not strictly V < P)
+        assert (arr.pair_mask[0] & (1 << 2)) == 0
+
+    def test_pair_mask_missing_event_treated_as_not_satisfied(self):
+        """Verify missing events result in bit clear."""
+        from datetime import datetime
+        base = datetime(2024, 1, 1)
+
+        # Only V event, no P event
+        v = CVDVulnerability('CVE-2024-001')
+        v.apply_event(CVDEvent.V, timestamp=base)
+
+        arr = CVDArray([v])
+        arr.sync()
+
+        # Bit 2 = V≺P should be clear (P not present)
+        assert (arr.pair_mask[0] & (1 << 2)) == 0
+
+    def test_pair_mask_zero_day_detection(self):
+        """Verify pair_mask can detect zero-day exploit (X before V)."""
+        from datetime import datetime, timedelta
+        base = datetime(2024, 1, 1)
+
+        # Zero-day: X before V
+        v = CVDVulnerability('CVE-2024-001')
+        v.apply_event(CVDEvent.X, timestamp=base)
+        v.apply_event(CVDEvent.V, timestamp=base + timedelta(days=5))
+
+        arr = CVDArray([v])
+        arr.sync()
+
+        # Bit 3 = V≺X should be clear (X came first)
+        assert (arr.pair_mask[0] & (1 << 3)) == 0
+
+        # is_zero_day_exploit should be True
+        assert arr.is_zero_day_exploit[0]
+
+    def test_pair_mask_caching(self):
+        """Verify pair_mask is cached (same object on repeated access)."""
+        arr = CVDArray.random(10, seed=42)
+
+        mask1 = arr.pair_mask
+        mask2 = arr.pair_mask
+
+        # Should be the same object (cached)
+        assert mask1 is mask2
+
+    def test_pair_mask_dirty_after_sync(self):
+        """Verify pair_mask is recomputed after sync() modifies timestamps."""
+        from datetime import datetime, timedelta
+        base = datetime(2024, 1, 1)
+
+        v = CVDVulnerability('CVE-2024-001')
+        v.apply_event(CVDEvent.V, timestamp=base)
+
+        arr = CVDArray([v])
+        arr.sync()
+
+        # Get initial pair_mask
+        mask1 = arr.pair_mask.copy()  # Copy to avoid reference comparison issues
+        initial_bit = mask1[0] & (1 << 2)
+
+        # Modify the vulnerability and sync (explicit indices needed since
+        # arr[0].apply_event() doesn't automatically mark index dirty)
+        arr[0].apply_event(CVDEvent.P, timestamp=base + timedelta(days=10))
+        arr.sync(indices=[0])
+
+        # V≺P bit should now be set (was not set before)
+        assert initial_bit == 0  # Was not set before P was added
+        assert (arr.pair_mask[0] & (1 << 2)) != 0  # Now set after sync
+
+    def test_history_id_incomplete_history(self):
+        """Verify history_id returns 255 for incomplete histories."""
+        from datetime import datetime
+        base = datetime(2024, 1, 1)
+
+        # Only 3 events (incomplete)
+        v = CVDVulnerability('CVE-2024-001')
+        v.apply_event(CVDEvent.V, timestamp=base)
+        v.apply_event(CVDEvent.F, timestamp=base)
+        v.apply_event(CVDEvent.P, timestamp=base)
+
+        arr = CVDArray([v])
+        arr.sync()
+
+        # Should be 255 (incomplete)
+        assert arr.history_id[0] == 255
+
+    def test_history_id_perfect_cvd(self):
+        """Verify history_id 69 for perfect VFDPXA ordering."""
+        from datetime import datetime, timedelta
+
+        from vulnstate.constants import VALID_HISTORIES
+        base = datetime(2024, 1, 1)
+
+        # Perfect CVD: VFDPXA (index 69)
+        v = CVDVulnerability('CVE-2024-001')
+        v.apply_event(CVDEvent.V, timestamp=base)
+        v.apply_event(CVDEvent.F, timestamp=base + timedelta(days=10))
+        v.apply_event(CVDEvent.D, timestamp=base + timedelta(days=20))
+        v.apply_event(CVDEvent.P, timestamp=base + timedelta(days=30))
+        v.apply_event(CVDEvent.X, timestamp=base + timedelta(days=40))
+        v.apply_event(CVDEvent.A, timestamp=base + timedelta(days=50))
+
+        arr = CVDArray([v])
+        arr.sync()
+
+        # Should be 69 (VFDPXA)
+        assert arr.history_id[0] == 69
+        assert VALID_HISTORIES[69] == "VFDPXA"
+
+    def test_history_id_worst_case(self):
+        """Verify history_id 0 for worst case AXPVFD ordering."""
+        from datetime import datetime, timedelta
+
+        from vulnstate.constants import VALID_HISTORIES
+        base = datetime(2024, 1, 1)
+
+        # Worst case: AXPVFD (index 0)
+        v = CVDVulnerability('CVE-2024-001')
+        v.apply_event(CVDEvent.A, timestamp=base)
+        v.apply_event(CVDEvent.X, timestamp=base + timedelta(days=10))
+        v.apply_event(CVDEvent.P, timestamp=base + timedelta(days=20))
+        v.apply_event(CVDEvent.V, timestamp=base + timedelta(days=30))
+        v.apply_event(CVDEvent.F, timestamp=base + timedelta(days=40))
+        v.apply_event(CVDEvent.D, timestamp=base + timedelta(days=50))
+
+        arr = CVDArray([v])
+        arr.sync()
+
+        # Should be 0 (AXPVFD)
+        assert arr.history_id[0] == 0
+        assert VALID_HISTORIES[0] == "AXPVFD"
+
+    def test_history_id_caching(self):
+        """Verify history_id is cached (same object on repeated access)."""
+        from datetime import datetime, timedelta
+        base = datetime(2024, 1, 1)
+
+        # Complete history
+        v = CVDVulnerability('CVE-2024-001')
+        for i, event in enumerate([CVDEvent.V, CVDEvent.F, CVDEvent.D,
+                                   CVDEvent.P, CVDEvent.X, CVDEvent.A]):
+            v.apply_event(event, timestamp=base + timedelta(days=i * 10))
+
+        arr = CVDArray([v])
+        arr.sync()
+
+        id1 = arr.history_id
+        id2 = arr.history_id
+
+        # Should be the same object (cached)
+        assert id1 is id2
+
+    def test_history_id_dirty_after_sync(self):
+        """Verify history_id is recomputed after sync() modifies timestamps."""
+        from datetime import datetime, timedelta
+        base = datetime(2024, 1, 1)
+
+        # Start with 5 events (incomplete)
+        v = CVDVulnerability('CVE-2024-001')
+        for i, event in enumerate([CVDEvent.V, CVDEvent.F, CVDEvent.D,
+                                   CVDEvent.P, CVDEvent.X]):
+            v.apply_event(event, timestamp=base + timedelta(days=i * 10))
+
+        arr = CVDArray([v])
+        arr.sync()
+
+        # Should be 255 (incomplete)
+        assert arr.history_id[0] == 255
+
+        # Add the 6th event (explicit indices needed since arr[0].apply_event()
+        # doesn't automatically mark index dirty)
+        arr[0].apply_event(CVDEvent.A, timestamp=base + timedelta(days=50))
+        arr.sync(indices=[0])
+
+        # Now should be 69 (VFDPXA)
+        assert arr.history_id[0] == 69
+
+    def test_history_id_empty_array(self):
+        """Verify history_id works with empty arrays."""
+        arr = CVDArray([])
+
+        assert len(arr.history_id) == 0
+        assert arr.history_id.dtype == np.uint8
+
+    def test_history_id_mixed_complete_incomplete(self):
+        """Verify history_id handles mix of complete and incomplete histories."""
+        from datetime import datetime, timedelta
+        base = datetime(2024, 1, 1)
+
+        # v1: Complete (VFDPXA)
+        v1 = CVDVulnerability('CVE-2024-001')
+        for i, event in enumerate([CVDEvent.V, CVDEvent.F, CVDEvent.D,
+                                   CVDEvent.P, CVDEvent.X, CVDEvent.A]):
+            v1.apply_event(event, timestamp=base + timedelta(days=i * 10))
+
+        # v2: Incomplete (only VFP)
+        v2 = CVDVulnerability('CVE-2024-002')
+        v2.apply_event(CVDEvent.V, timestamp=base)
+        v2.apply_event(CVDEvent.F, timestamp=base + timedelta(days=10))
+        v2.apply_event(CVDEvent.P, timestamp=base + timedelta(days=20))
+
+        arr = CVDArray([v1, v2])
+        arr.sync()
+
+        # v1 should be 69, v2 should be 255
+        assert arr.history_id[0] == 69
+        assert arr.history_id[1] == 255
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

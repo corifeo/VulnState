@@ -408,10 +408,43 @@ _THREAT_STATE_STRINGS: dict[int, str] = {
 
 
 # ==================== PAIR BITMASK CONSTANTS ====================
+#
+# The pair_mask is a uint16 bitmask encoding which of 15 event pairs occurred
+# in their "desired" chronological order. This enables O(1) vectorized queries
+# for CVD analytics like is_zero_day, is_coordinated, etc.
+#
+# ENCODING:
+#   - Bit i = 1 if pair i occurred in desired order (earlier_ts < later_ts)
+#   - Bit i = 0 if pair violated, events simultaneous, or one/both events missing
+#
+# BIT LAYOUT (15 bits, fits in uint16):
+#   Bit 0: V≺F    Bit 5: F≺D    Bit 9:  D≺P    Bit 12: P≺X
+#   Bit 1: V≺D    Bit 6: F≺P    Bit 10: D≺X    Bit 13: P≺A
+#   Bit 2: V≺P    Bit 7: F≺X    Bit 11: D≺A    Bit 14: X≺A
+#   Bit 3: V≺X    Bit 8: F≺A
+#   Bit 4: V≺A
+#
+# CLASSIFICATION:
+#   - Bits 0, 1, 5 (V≺F, V≺D, F≺D): Constraint pairs - always satisfied in valid states
+#   - Bits 2-4, 6-14: Desiderata pairs - the 12 "desired" orderings from CVD model
+#
+# USAGE EXAMPLES:
+#   >>> # Check if coordinated (V before P)
+#   >>> is_coordinated = (pair_mask & (1 << 2)) != 0
+#
+#   >>> # Check if zero-day exploit (X before V = V≺X violated)
+#   >>> is_zero_day_exploit = (pair_mask & (1 << 3)) == 0
+#
+#   >>> # Count satisfied desiderata (12 bits, excluding constraints)
+#   >>> DESIDERATA_MASK = 0b0111_1111_1111_1100  # Bits 2-14
+#   >>> count = bin(pair_mask & DESIDERATA_MASK).count('1')
+#
+# See: docs/design/2026-01-20-cvd-state-storage-architecture.md
+# See: models.ArrayCVDAnalytics for storage, models.compute_pair_mask() for computation
 
 # All 15 event pairs with bit positions
 # Order: V-F, V-D, V-P, V-X, V-A, F-D, F-P, F-X, F-A, D-P, D-X, D-A, P-X, P-A, X-A
-_PAIR_ORDER = [
+_PAIR_ORDER: list[tuple[CVDEvent, CVDEvent]] = [
     (CVDEvent.V, CVDEvent.F),  # 0
     (CVDEvent.V, CVDEvent.D),  # 1
     (CVDEvent.V, CVDEvent.P),  # 2
@@ -437,8 +470,12 @@ PAIR_NAMES: dict[int, str] = {
     i: f"{pair[0].name}≺{pair[1].name}" for i, pair in enumerate(_PAIR_ORDER)
 }
 
-# Required pairs mask: V≺F (0), V≺D (1), F≺D (5)
+# Required pairs mask: V≺F (0), V≺D (1), F≺D (5) - constraint pairs
 REQUIRED_PAIRS_MASK: int = (1 << 0) | (1 << 1) | (1 << 5)  # 0b100011 = 35
+
+# Desiderata mask: all 12 desiderata pairs (bits 2-4, 6-14)
+# Use this to extract only desiderata-relevant bits from pair_mask
+DESIDERATA_MASK: int = 0b0111_1111_1111_1100  # 0x7FFC = 32764
 
 # Desiderata pairs bit positions (12 desired orderings)
 # Maps DESIDERATA_PAIRS to their bit positions in pair_mask
@@ -456,6 +493,101 @@ DESIDERATA_PAIRS_BITS: list[int] = [
     13,  # P≺A
     14,  # X≺A
 ]
+
+
+# ==================== VALID HISTORIES ====================
+#
+# The 70 valid complete disclosure histories (all 6 events in order).
+# These are the only possible orderings when the V→F→D constraint is enforced.
+# Index 0-69 corresponds to history_id field in ArrayCVDAnalytics.
+#
+# Ordered from worst (AXPVFD, rank 1) to best (VFDPXA, rank 62, perfect CVD).
+# Value 255 is reserved for incomplete histories (fewer than 6 events).
+#
+# See: docs/ref/cvd-histories.md for detailed ranking and interpretation
+VALID_HISTORIES: tuple[str, ...] = (
+    # Adverse outcomes (0-8) - rank 1-8, 0-4 desiderata
+    "AXPVFD",  # 0: rank 1, worst case - attacks first
+    "APVXFD",  # 1: rank 2
+    "AVXPFD",  # 2: rank 3
+    "XPVAFD",  # 3: rank 4
+    "VAXPFD",  # 4: rank 5
+    "PVAXFD",  # 5: rank 6
+    "AVPXFD",  # 6: rank 7
+    "APVFXD",  # 7: rank 7
+    "XPVFAD",  # 8: rank 8
+    # Poor outcomes (9-24) - rank 9-21, 4-6 desiderata
+    "VAPXFD",  # 9: rank 9
+    "PVXAFD",  # 10: rank 10
+    "VPAXFD",  # 11: rank 11
+    "PVAFXD",  # 12: rank 11
+    "VXPAFD",  # 13: rank 11
+    "AVPFXD",  # 14: rank 12
+    "APVFDX",  # 15: rank 13
+    "VAPFXD",  # 16: rank 14
+    "XPVFDA",  # 17: rank 15
+    "PVXFAD",  # 18: rank 16
+    "AVFXPD",  # 19: rank 17
+    "VPXAFD",  # 20: rank 18
+    "PVFAXD",  # 21: rank 19
+    "VXPFAD",  # 22: rank 19
+    "VPAFXD",  # 23: rank 20
+    "VAFXPD",  # 24: rank 21
+    # Acceptable outcomes (25-44) - rank 22-39, 5-8 desiderata
+    "PVAFDX",  # 25: rank 22
+    "AVPFDX",  # 26: rank 23
+    "AVFPXD",  # 27: rank 24
+    "PVFXAD",  # 28: rank 25
+    "VPXFAD",  # 29: rank 25
+    "VAPFDX",  # 30: rank 26
+    "VAFPXD",  # 31: rank 27
+    "PVXFDA",  # 32: rank 28
+    "VPFAXD",  # 33: rank 29
+    "VFAXPD",  # 34: rank 30
+    "VXPFDA",  # 35: rank 31
+    "PVFADX",  # 36: rank 32
+    "VPAFDX",  # 37: rank 33
+    "VPFXAD",  # 38: rank 34
+    "AVFPDX",  # 39: rank 35
+    "VFAPXD",  # 40: rank 36
+    "VPXFDA",  # 41: rank 37
+    "PVFXDA",  # 42: rank 37
+    "VAFPDX",  # 43: rank 38
+    "VPFADX",  # 44: rank 39
+    # Good outcomes (45-58) - rank 40-52, 6-10 desiderata
+    "VFPAXD",  # 45: rank 40
+    "VFXPAD",  # 46: rank 41
+    "AVFDXP",  # 47: rank 42
+    "PVFDAX",  # 48: rank 43
+    "VAFDXP",  # 49: rank 44
+    "VPFXDA",  # 50: rank 45
+    "VFAPDX",  # 51: rank 46
+    "VFPXAD",  # 52: rank 46
+    "AVFDPX",  # 53: rank 47
+    "PVFDXA",  # 54: rank 48
+    "VPFDAX",  # 55: rank 49
+    "VFXPDA",  # 56: rank 50
+    "VFPADX",  # 57: rank 51
+    "VAFDPX",  # 58: rank 52
+    # Ideal outcomes (59-69) - rank 53-62, 8-12 desiderata
+    "VFADXP",  # 59: rank 53
+    "VPFDXA",  # 60: rank 54
+    "VFPXDA",  # 61: rank 55
+    "VFADPX",  # 62: rank 56
+    "VFPDAX",  # 63: rank 57
+    "VFDAXP",  # 64: rank 58 - silent fix ideal
+    "VFPDXA",  # 65: rank 59
+    "VFDAPX",  # 66: rank 60
+    "VFDXPA",  # 67: rank 61
+    "VFDPAX",  # 68: rank 61
+    "VFDPXA",  # 69: rank 62 - perfect CVD
+)
+
+# Reverse lookup: history string -> history_id (0-69)
+HISTORY_TO_ID: dict[str, int] = {h: i for i, h in enumerate(VALID_HISTORIES)}
+
+# Sentinel value for incomplete histories (fewer than 6 events)
+INCOMPLETE_HISTORY_ID: int = 255
 
 
 class EventPairRelation(Enum):

@@ -311,32 +311,39 @@ class ArrayCVDAnalytics:
     Computed once during array construction or sync(), reused for all queries.
     These are DERIVED from ArrayCVDState - not independent source data.
 
-    Memory cost: 2 bytes/vuln for pair_mask
+    Memory cost: 3 bytes/vuln (2 for pair_mask + 1 for history_id)
     Performance gain: O(1) vectorized queries vs O(n log n) timestamp sorting
 
-    See docs/design/2026-01-20-cvd-state-storage-architecture.md for encoding.
+    Edge case - simultaneous events:
+        If two events occur at the exact same timestamp (same microsecond),
+        the pair is treated as "not satisfied" (bit clear). This means
+        is_zero_day_exploit returns True if X and V occur simultaneously,
+        since V did not occur strictly BEFORE X. This is intentional - if
+        vendor awareness wasn't established before exploit, that's still
+        a problematic disclosure pattern.
+
+    See:
+        - docs/design/2026-01-20-cvd-state-storage-architecture.md
+        - vulnstate.constants.PAIR_BIT_POSITIONS for bit encoding
     """
 
     # Pair ordering mask (15 bits for 15 event pairs)
-    # Bit i = 1 if pair i occurred in desired order
-    # Example: bit 2 (V≺P) = 1 if V timestamp < P timestamp
-    # Bit layout:
-    #   0: V≺F   5: F≺D    9: D≺P   12: P≺X
-    #   1: V≺D   6: F≺P   10: D≺X   13: P≺A
-    #   2: V≺P   7: F≺X   11: D≺A   14: X≺A
-    #   3: V≺X   8: F≺A
-    #   4: V≺A
+    # Bit i = 1 if pair i occurred in desired order (strictly less than)
+    # Bit is 0 if: pair violated, events simultaneous, or one/both events missing
+    # See constants.PAIR_BIT_POSITIONS for canonical bit layout
     pair_mask: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.uint16))
 
-    # Optional: History ID (0-69 for complete histories, 255 for incomplete)
-    # Maps to one of 70 valid complete orderings (see docs/ref/cvd-histories.md)
-    # Only meaningful if all 6 events occurred
-    # history_id: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.uint8))
+    # History ID (0-69 for complete histories, 255 for incomplete)
+    # Maps to one of 70 valid complete orderings when all 6 events occurred
+    # See docs/ref/cvd-histories.md for the 70 valid orderings
+    # Value 255 indicates incomplete history (fewer than 6 events)
+    history_id: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.uint8))
 
     def __getitem__(self, key: Any) -> "ArrayCVDAnalytics":
         """Slice all arrays consistently."""
         return ArrayCVDAnalytics(
             pair_mask=self.pair_mask[key],
+            history_id=self.history_id[key] if len(self.history_id) else self.history_id,
         )
 
 
@@ -730,3 +737,66 @@ def compute_pair_mask(cvd_state: ArrayCVDState) -> np.ndarray:
         mask[satisfied] |= (1 << bit_pos)
 
     return mask
+
+
+def compute_history_id(cvd_state: ArrayCVDState) -> np.ndarray:
+    """
+    Compute history IDs from timestamps (0-69 for complete, 255 for incomplete).
+
+    For vulnerabilities with all 6 events, sorts timestamps to get the
+    chronological ordering, then looks up the history in VALID_HISTORIES
+    to get the canonical history_id (0-69).
+
+    For incomplete histories (fewer than 6 events), returns 255.
+
+    Args:
+        cvd_state: ArrayCVDState with timestamps for all 6 events
+
+    Returns:
+        np.ndarray[uint8]: History ID array
+            - 0-69: Index into VALID_HISTORIES for complete histories
+            - 255: Incomplete history (not all 6 events occurred)
+
+    Example:
+        >>> state = ArrayCVDState(...)  # with timestamps for V, F, D, P, X, A
+        >>> ids = compute_history_id(state)
+        >>> ids[0]  # 69 for VFDPXA (perfect CVD)
+    """
+    from .constants import HISTORY_TO_ID, INCOMPLETE_HISTORY_ID
+
+    n = len(cvd_state.states)
+    result = np.full(n, INCOMPLETE_HISTORY_ID, dtype=np.uint8)
+
+    # Stack all timestamps: shape (N, 6)
+    timestamps = np.column_stack([
+        cvd_state.V_timestamps,
+        cvd_state.F_timestamps,
+        cvd_state.D_timestamps,
+        cvd_state.P_timestamps,
+        cvd_state.X_timestamps,
+        cvd_state.A_timestamps,
+    ])
+
+    # Event labels for building history strings
+    event_labels = ["V", "F", "D", "P", "X", "A"]
+
+    # Check which rows have all 6 events (no NaT values)
+    complete_mask = ~np.any(np.isnat(timestamps), axis=1)
+
+    # Process only complete histories
+    for i in np.where(complete_mask)[0]:
+        # Get timestamps for this vulnerability
+        ts = timestamps[i]
+
+        # Sort indices by timestamp to get chronological order
+        order = np.argsort(ts)
+
+        # Build history string
+        history = "".join(event_labels[j] for j in order)
+
+        # Look up history_id
+        if history in HISTORY_TO_ID:
+            result[i] = HISTORY_TO_ID[history]
+        # else: remains 255 (invalid history - should not happen with valid data)
+
+    return result
