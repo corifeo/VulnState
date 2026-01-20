@@ -83,7 +83,7 @@ class TestCVSSExtraction:
                 }
             }
         }
-        score, vector = NVDParser.extract_cvss(item, "2.0")
+        score, vector, exploit, impact = NVDParser.extract_cvss(item, "2.0")
         assert score == 9.8  # Should prefer Primary
         assert vector == "CVSS:3.1/AV:N/AC:H"
 
@@ -98,7 +98,7 @@ class TestCVSSExtraction:
                 }
             }
         }
-        score, vector = NVDParser.extract_cvss(item, "2.0")
+        score, vector, exploit, impact = NVDParser.extract_cvss(item, "2.0")
         assert score == 7.5
         assert vector == "CVSS:3.1/AV:N"
 
@@ -113,7 +113,7 @@ class TestCVSSExtraction:
                 }
             }
         }
-        score, vector = NVDParser.extract_cvss(item, "2.0")
+        score, vector, exploit, impact = NVDParser.extract_cvss(item, "2.0")
         assert score == 6.5
         assert vector == "CVSS:3.0/AV:L"
 
@@ -128,7 +128,7 @@ class TestCVSSExtraction:
                 }
             }
         }
-        score, vector = NVDParser.extract_cvss(item, "2.0")
+        score, vector, exploit, impact = NVDParser.extract_cvss(item, "2.0")
         assert score == 5.0
         assert vector == "AV:N/AC:L"
 
@@ -141,7 +141,7 @@ class TestCVSSExtraction:
                 }
             }
         }
-        score, vector = NVDParser.extract_cvss(item, "1.1")
+        score, vector, exploit, impact = NVDParser.extract_cvss(item, "1.1")
         assert score == 8.8
         assert vector == "CVSS:3.0/AV:N/AC:L"
 
@@ -154,16 +154,57 @@ class TestCVSSExtraction:
                 }
             }
         }
-        score, vector = NVDParser.extract_cvss(item, "1.1")
+        score, vector, exploit, impact = NVDParser.extract_cvss(item, "1.1")
         assert score == 7.5
         assert vector == "AV:N/AC:L"
 
     def test_extract_cvss_no_data(self):
         """Return None when no CVSS data available."""
         item = {"cve": {"metrics": {}}}
-        score, vector = NVDParser.extract_cvss(item, "2.0")
+        score, vector, exploit, impact = NVDParser.extract_cvss(item, "2.0")
         assert score is None
         assert vector is None
+        assert exploit is None
+        assert impact is None
+
+    def test_extract_cvss_with_subscores_nvd_20(self):
+        """Extract exploitability and impact sub-scores from NVD 2.0."""
+        item = {
+            "cve": {
+                "metrics": {
+                    "cvssMetricV31": [
+                        {
+                            "type": "Primary",
+                            "cvssData": {"baseScore": 9.8, "vectorString": "CVSS:3.1/AV:N/AC:L"},
+                            "exploitabilityScore": 3.9,
+                            "impactScore": 5.9,
+                        },
+                    ]
+                }
+            }
+        }
+        score, vector, exploit, impact = NVDParser.extract_cvss(item, "2.0")
+        assert score == 9.8
+        assert vector == "CVSS:3.1/AV:N/AC:L"
+        assert exploit == 3.9
+        assert impact == 5.9
+
+    def test_extract_cvss_with_subscores_nvd_11(self):
+        """Extract exploitability and impact sub-scores from NVD 1.1."""
+        item = {
+            "impact": {
+                "baseMetricV3": {
+                    "cvssV3": {"baseScore": 8.8, "vectorString": "CVSS:3.0/AV:N/AC:L"},
+                    "exploitabilityScore": 2.8,
+                    "impactScore": 5.9,
+                }
+            }
+        }
+        score, vector, exploit, impact = NVDParser.extract_cvss(item, "1.1")
+        assert score == 8.8
+        assert vector == "CVSS:3.0/AV:N/AC:L"
+        assert exploit == 2.8
+        assert impact == 5.9
 
 
 class TestPublishedDateExtraction:
@@ -417,7 +458,7 @@ class TestRegressionScenarios:
             }
         }
 
-        score, _ = NVDParser.extract_cvss(item, "2.0")
+        score, _, _, _ = NVDParser.extract_cvss(item, "2.0")
         assert score == 9.8  # Should prefer v3.1
 
     def test_empty_array_optimization(self):

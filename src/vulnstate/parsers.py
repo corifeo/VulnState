@@ -101,19 +101,21 @@ class NVDParser:
             return None
 
     @staticmethod
-    def extract_cvss(item: dict[str, Any], format_version: str) -> tuple[Optional[float], Optional[str]]:
+    def extract_cvss(
+        item: dict[str, Any], format_version: str
+    ) -> tuple[Optional[float], Optional[str], Optional[float], Optional[float]]:
         """
-        Extract CVSS score and vector from NVD item based on format version.
+        Extract CVSS score, vector, and sub-scores from NVD item.
 
         Args:
             item: NVD vulnerability item
             format_version: "1.1" or "2.0"
 
         Returns:
-            Tuple of (cvss_score, cvss_vector), both Optional
+            Tuple of (base_score, vector_string, exploitability_score, impact_score)
         """
         if format_version == "2.0":
-            # NVD 2.0: item['cve']['metrics']['cvssMetricV31'][0]['cvssData']
+            # NVD 2.0: item['cve']['metrics']['cvssMetricV31'][0]
             metrics = item.get("cve", {}).get("metrics", {})
 
             # Try CVSS v3.1 first (cvssMetricV31)
@@ -123,39 +125,74 @@ class NVDParser:
                 for metric in cvss_v31_list:
                     if metric.get("type") == "Primary":
                         cvss_data = metric.get("cvssData", {})
-                        return cvss_data.get("baseScore"), cvss_data.get("vectorString")
+                        return (
+                            cvss_data.get("baseScore"),
+                            cvss_data.get("vectorString"),
+                            metric.get("exploitabilityScore"),
+                            metric.get("impactScore"),
+                        )
                 # No primary, use first one
-                cvss_data = cvss_v31_list[0].get("cvssData", {})
-                return cvss_data.get("baseScore"), cvss_data.get("vectorString")
+                metric = cvss_v31_list[0]
+                cvss_data = metric.get("cvssData", {})
+                return (
+                    cvss_data.get("baseScore"),
+                    cvss_data.get("vectorString"),
+                    metric.get("exploitabilityScore"),
+                    metric.get("impactScore"),
+                )
 
             # Fallback to CVSS v3.0 (cvssMetricV30)
             cvss_v30_list = metrics.get("cvssMetricV30", [])
             if cvss_v30_list:
-                cvss_data = cvss_v30_list[0].get("cvssData", {})
-                return cvss_data.get("baseScore"), cvss_data.get("vectorString")
+                metric = cvss_v30_list[0]
+                cvss_data = metric.get("cvssData", {})
+                return (
+                    cvss_data.get("baseScore"),
+                    cvss_data.get("vectorString"),
+                    metric.get("exploitabilityScore"),
+                    metric.get("impactScore"),
+                )
 
             # Fallback to CVSS v2.0
             cvss_v2_list = metrics.get("cvssMetricV2", [])
             if cvss_v2_list:
-                cvss_data = cvss_v2_list[0].get("cvssData", {})
-                return cvss_data.get("baseScore"), cvss_data.get("vectorString")
+                metric = cvss_v2_list[0]
+                cvss_data = metric.get("cvssData", {})
+                return (
+                    cvss_data.get("baseScore"),
+                    cvss_data.get("vectorString"),
+                    metric.get("exploitabilityScore"),
+                    metric.get("impactScore"),
+                )
 
         else:
-            # NVD 1.1: item['impact']['baseMetricV3']['cvssV3']
+            # NVD 1.1: item['impact']['baseMetricV3']
             impact = item.get("impact", {})
 
             # Try CVSS v3
             if "baseMetricV3" in impact:
-                cvss_v3 = impact["baseMetricV3"].get("cvssV3", {})
-                return cvss_v3.get("baseScore"), cvss_v3.get("vectorString")
+                base_metric = impact["baseMetricV3"]
+                cvss_v3 = base_metric.get("cvssV3", {})
+                return (
+                    cvss_v3.get("baseScore"),
+                    cvss_v3.get("vectorString"),
+                    base_metric.get("exploitabilityScore"),
+                    base_metric.get("impactScore"),
+                )
 
             # Fallback to CVSS v2
             if "baseMetricV2" in impact:
-                cvss_v2 = impact["baseMetricV2"].get("cvssV2", {})
-                return cvss_v2.get("baseScore"), cvss_v2.get("vectorString")
+                base_metric = impact["baseMetricV2"]
+                cvss_v2 = base_metric.get("cvssV2", {})
+                return (
+                    cvss_v2.get("baseScore"),
+                    cvss_v2.get("vectorString"),
+                    base_metric.get("exploitabilityScore"),
+                    base_metric.get("impactScore"),
+                )
 
         # No CVSS data found
-        return None, None
+        return None, None, None, None
 
     @staticmethod
     def parse_cvss_vector(vector: Optional[str]) -> dict[str, Optional[str]]:
@@ -370,10 +407,14 @@ class NVDParser:
 
         vuln = CVDVulnerability(cve_id)
 
-        # Extract CVSS score and vector
-        cvss_score, cvss_vector = NVDParser.extract_cvss(item, format_version)
+        # Extract CVSS score, vector, and sub-scores
+        cvss_score, cvss_vector, exploitability, impact = NVDParser.extract_cvss(
+            item, format_version
+        )
         vuln.cvss_score = cvss_score
         vuln.cve_vector = cvss_vector
+        vuln.scoring.cvss_exploitability_score = exploitability
+        vuln.scoring.cvss_impact_score = impact
 
         # Extract ALL CPEs and derive vendor/product lists
         cpe_strings = NVDParser.extract_all_cpes(item, format_version)
@@ -552,11 +593,15 @@ class NVDParser:
                 if idx is not None:
                     vuln = arr.get(idx)
 
-                    # Update CVSS score and vector using format-aware helper
-                    cvss_score, cvss_vector = NVDParser.extract_cvss(item, format_version)
+                    # Update CVSS score, vector, and sub-scores
+                    cvss_score, cvss_vector, exploitability, impact = (
+                        NVDParser.extract_cvss(item, format_version)
+                    )
                     if cvss_score is not None:
                         vuln.cvss_score = cvss_score
                         vuln.cve_vector = cvss_vector
+                        vuln.scoring.cvss_exploitability_score = exploitability
+                        vuln.scoring.cvss_impact_score = impact
                         # Update metadata arrays
                         if "cvss_score" in arr._metadata_raw:
                             arr._metadata_raw["cvss_score"][idx] = cvss_score
