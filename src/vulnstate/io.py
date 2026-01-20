@@ -56,6 +56,8 @@ class CVDIO:
             try:
                 import tempfile
 
+                # TODO: replace with httpx for async support
+                # TODO: add test case for URL import
                 import requests
 
                 # Download to temp file

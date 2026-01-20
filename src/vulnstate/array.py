@@ -41,12 +41,13 @@ from .constants import (
 from .models import (
     ArrayAnalytics,
     ArrayCoreData,
+    ArrayCVDAnalytics,
+    ArrayCVDState,
     ArrayEnrichment,
-    ArrayEventOrders,
-    ArrayHistories,
     ArrayMetadata,
     ArrayScoring,
     ArrayTimestamps,
+    compute_pair_mask,
 )
 from .vulnerability import CVDVulnerability
 
@@ -99,8 +100,7 @@ class CVDArray:
         self._metadata_data = ArrayMetadata()
         self.scoring = ArrayScoring()
         self.enrichment = ArrayEnrichment()
-        self.histories = ArrayHistories()
-        self.event_orders = ArrayEventOrders()
+        self.bitmasks = ArrayCVDAnalytics()  # Precomputed pair_mask for vectorized queries
 
         # Metadata encoders (for categorical optimization - not yet implemented)
         self._metadata_encoders: dict[str, Any] = {}
@@ -110,6 +110,9 @@ class CVDArray:
 
         # Analysis cache (computed on first access)
         self._analysis_cache: Optional[AnalysisResult] = None
+
+        # Bitmask dirty tracking (recompute pair_mask when timestamps change)
+        self._pair_mask_dirty = True
 
         # Fixed-size semantics
         self._fixed_size = fixed_size
@@ -251,61 +254,6 @@ class CVDArray:
                     self._metadata_data.raw[key] = np.array(values, dtype=np.float32)
                 except (ValueError, TypeError):
                     self._metadata_data.raw[key] = np.array(values, dtype=object)
-
-        # Extract histories (1D with offsets for compact storage)
-        all_events = []
-        all_from_states = []
-        all_to_states = []
-        all_timestamps = []
-        offsets = [0]
-
-        for vuln in vulnerabilities:
-            history = vuln.history
-            for entry in history:
-                # event: CVDEvent or None → int8 (-1 for None)
-                evt = entry['event'].value if entry['event'] is not None else -1
-                all_events.append(evt)
-
-                # from_state: 'INIT' or state string → uint8 (255 for INIT)
-                from_st = entry['from_state']
-                if from_st == 'INIT':
-                    all_from_states.append(255)
-                else:
-                    all_from_states.append(string_to_state_int(from_st))
-
-                # to_state: state string or None → uint8 (255 for None)
-                to_st = entry.get('to_state')
-                if to_st is None or to_st == 'INIT':
-                    all_to_states.append(255)
-                else:
-                    all_to_states.append(string_to_state_int(to_st))
-
-                # timestamp
-                ts = entry.get('timestamp')
-                if ts:
-                    all_timestamps.append(np.datetime64(ts, 'us'))
-                else:
-                    all_timestamps.append(np.datetime64('NaT'))
-
-            offsets.append(len(all_events))
-
-        self.histories.events = np.array(all_events, dtype=np.int8)
-        self.histories.from_states = np.array(all_from_states, dtype=np.uint8)
-        self.histories.to_states = np.array(all_to_states, dtype=np.uint8)
-        self.histories.timestamps = np.array(all_timestamps, dtype='datetime64[us]')
-        self.histories.offsets = np.array(offsets, dtype=np.int32)
-
-        # Extract event orders (1D with offsets for compact storage)
-        all_orders = []
-        order_offsets = [0]
-
-        for vuln in vulnerabilities:
-            order = vuln.event_order  # list[CVDEvent]
-            all_orders.extend([evt.value for evt in order])
-            order_offsets.append(len(all_orders))
-
-        self.event_orders.events = np.array(all_orders, dtype=np.int8)
-        self.event_orders.offsets = np.array(order_offsets, dtype=np.int32)
 
         # Restore fixed_size flag (preserve during rebuilds)
         self._fixed_size = was_fixed
@@ -453,6 +401,46 @@ class CVDArray:
         }
 
     @property
+    def pair_mask(self) -> np.ndarray:
+        """
+        Get precomputed pair ordering mask (uint16 bitmask).
+
+        Computed once and cached. Recomputed when timestamps change (after sync()).
+        Used for fast O(1) vectorized queries on event pair relationships.
+
+        Returns:
+            np.ndarray[uint16]: Bitmask where bit i indicates if pair i is satisfied.
+                Bit 0 = V≺F, Bit 1 = V≺D, ..., Bit 14 = X≺A
+
+        Examples:
+            >>> # Check if vendor aware before public (V≺P, bit 2)
+            >>> is_coordinated = (arr.pair_mask & (1 << 2)) != 0
+
+            >>> # Check for zero-day exploit (V≺X bit clear)
+            >>> is_zero_day_exploit = (arr.pair_mask & (1 << 3)) == 0
+
+        See:
+            docs/design/2026-01-20-cvd-state-storage-architecture.md
+        """
+        if self._pair_mask_dirty or len(self.bitmasks.pair_mask) != len(self):
+            # Create ArrayCVDState from existing data (source of truth)
+            cvd_state = ArrayCVDState(
+                states=self.state_ints,
+                V_timestamps=self.V_timestamps,
+                F_timestamps=self.F_timestamps,
+                D_timestamps=self.D_timestamps,
+                P_timestamps=self.P_timestamps,
+                X_timestamps=self.X_timestamps,
+                A_timestamps=self.A_timestamps,
+            )
+
+            # Compute pair_mask from source data
+            self.bitmasks.pair_mask = compute_pair_mask(cvd_state)
+            self._pair_mask_dirty = False
+
+        return self.bitmasks.pair_mask
+
+    @property
     def severities(self) -> np.ndarray:
         """Get severities analytics array.
 
@@ -534,6 +522,8 @@ class CVDArray:
         True if X event occurred before V event. Indicates attacker had
         working exploit before vendor knew vulnerability existed.
 
+        Uses precomputed pair_mask for O(1) lookup (bit 3: V≺X).
+
         Returns:
             Boolean array indicating zero-day exploit status
 
@@ -541,15 +531,15 @@ class CVDArray:
             >>> arr.is_zero_day_exploit
             array([False, True, False, ...], dtype=bool)
         """
+        # V≺X (bit 3): if clear, then X before V (zero-day exploit)
+        # Check if both events occurred first
         v_times = self.V_timestamps
         x_times = self.X_timestamps
-
-        # Both must have occurred
         has_both = ~np.isnat(v_times) & ~np.isnat(x_times)
 
-        # X before V
+        # Use pair_mask: bit 3 clear means X before V
         result: np.ndarray = np.zeros(len(self), dtype=bool)
-        result[has_both] = x_times[has_both] < v_times[has_both]
+        result[has_both] = (self.pair_mask[has_both] & (1 << 3)) == 0
         return result
 
     @property
@@ -560,6 +550,8 @@ class CVDArray:
         True if A event occurred before V event. Indicates attacks were
         observed before vendor knew vulnerability existed.
 
+        Uses precomputed pair_mask for O(1) lookup (bit 4: V≺A).
+
         Returns:
             Boolean array indicating zero-day attack status
 
@@ -567,15 +559,15 @@ class CVDArray:
             >>> arr.is_zero_day_attack
             array([False, True, False, ...], dtype=bool)
         """
+        # V≺A (bit 4): if clear, then A before V (zero-day attack)
+        # Check if both events occurred first
         v_times = self.V_timestamps
         a_times = self.A_timestamps
-
-        # Both must have occurred
         has_both = ~np.isnat(v_times) & ~np.isnat(a_times)
 
-        # A before V
+        # Use pair_mask: bit 4 clear means A before V
         result: np.ndarray = np.zeros(len(self), dtype=bool)
-        result[has_both] = a_times[has_both] < v_times[has_both]
+        result[has_both] = (self.pair_mask[has_both] & (1 << 4)) == 0
         return result
 
     @property
@@ -586,6 +578,8 @@ class CVDArray:
         True if V event occurred before P event. Indicates proper coordination
         where vendor had awareness before public disclosure.
 
+        Uses precomputed pair_mask for O(1) lookup (bit 2: V≺P).
+
         Returns:
             Boolean array indicating coordinated disclosure status
 
@@ -593,15 +587,15 @@ class CVDArray:
             >>> arr.is_coordinated
             array([True, False, True, ...], dtype=bool)
         """
+        # V≺P (bit 2): if set, then V before P (coordinated)
+        # Check if both events occurred first
         v_times = self.V_timestamps
         p_times = self.P_timestamps
-
-        # Both must have occurred
         has_both = ~np.isnat(v_times) & ~np.isnat(p_times)
 
-        # V before P
+        # Use pair_mask: bit 2 set means V before P
         result: np.ndarray = np.zeros(len(self), dtype=bool)
-        result[has_both] = v_times[has_both] < p_times[has_both]
+        result[has_both] = (self.pair_mask[has_both] & (1 << 2)) != 0
         return result
 
     @property
@@ -612,6 +606,8 @@ class CVDArray:
         True if vendor awareness (V) preceded fix ready (F) which preceded
         public disclosure (P). This is the ideal disclosure sequence.
 
+        Uses precomputed pair_mask for O(1) lookup (bits 0, 6: V≺F and F≺P).
+
         Returns:
             Boolean array indicating responsible disclosure status
 
@@ -619,18 +615,18 @@ class CVDArray:
             >>> arr.is_responsible_disclosure
             array([True, False, True, ...], dtype=bool)
         """
+        # V≺F (bit 0) and F≺P (bit 6): both must be set
+        # Check if all three events occurred first
         v_times = self.V_timestamps
         f_times = self.F_timestamps
         p_times = self.P_timestamps
-
-        # All three must have occurred
         has_all = ~np.isnat(v_times) & ~np.isnat(f_times) & ~np.isnat(p_times)
 
-        # V before F before P
+        # Use pair_mask: bits 0 and 6 must both be set
         result: np.ndarray = np.zeros(len(self), dtype=bool)
-        v_before_f = v_times[has_all] < f_times[has_all]
-        f_before_p = f_times[has_all] < p_times[has_all]
-        result[has_all] = v_before_f & f_before_p
+        mask_vf = (self.pair_mask[has_all] & (1 << 0)) != 0  # V≺F
+        mask_fp = (self.pair_mask[has_all] & (1 << 6)) != 0  # F≺P
+        result[has_all] = mask_vf & mask_fp
         return result
 
     @property
@@ -641,6 +637,8 @@ class CVDArray:
         True if F event occurred before X event. Indicates vendor had
         fix ready before exploit became publicly available.
 
+        Uses precomputed pair_mask for O(1) lookup (bit 7: F≺X).
+
         Returns:
             Boolean array indicating fix-before-exploit status
 
@@ -648,15 +646,15 @@ class CVDArray:
             >>> arr.has_fix_before_exploit
             array([True, False, True, ...], dtype=bool)
         """
+        # F≺X (bit 7): if set, then F before X
+        # Check if both events occurred first
         f_times = self.F_timestamps
         x_times = self.X_timestamps
-
-        # Both must have occurred
         has_both = ~np.isnat(f_times) & ~np.isnat(x_times)
 
-        # F before X
+        # Use pair_mask: bit 7 set means F before X
         result: np.ndarray = np.zeros(len(self), dtype=bool)
-        result[has_both] = f_times[has_both] < x_times[has_both]
+        result[has_both] = (self.pair_mask[has_both] & (1 << 7)) != 0
         return result
 
     @property
@@ -667,6 +665,8 @@ class CVDArray:
         True if F event occurred before A event. Indicates vendor had
         fix ready before attacks were observed.
 
+        Uses precomputed pair_mask for O(1) lookup (bit 8: F≺A).
+
         Returns:
             Boolean array indicating fix-before-attack status
 
@@ -674,15 +674,15 @@ class CVDArray:
             >>> arr.has_fix_before_attack
             array([True, False, True, ...], dtype=bool)
         """
+        # F≺A (bit 8): if set, then F before A
+        # Check if both events occurred first
         f_times = self.F_timestamps
         a_times = self.A_timestamps
-
-        # Both must have occurred
         has_both = ~np.isnat(f_times) & ~np.isnat(a_times)
 
-        # F before A
+        # Use pair_mask: bit 8 set means F before A
         result: np.ndarray = np.zeros(len(self), dtype=bool)
-        result[has_both] = f_times[has_both] < a_times[has_both]
+        result[has_both] = (self.pair_mask[has_both] & (1 << 8)) != 0
         return result
 
     @property
@@ -693,6 +693,8 @@ class CVDArray:
         True if D event occurred before X event. Indicates fix was
         deployed before exploit became publicly available.
 
+        Uses precomputed pair_mask for O(1) lookup (bit 10: D≺X).
+
         Returns:
             Boolean array indicating deployment-before-exploit status
 
@@ -700,15 +702,15 @@ class CVDArray:
             >>> arr.has_deployment_before_exploit
             array([True, False, True, ...], dtype=bool)
         """
+        # D≺X (bit 10): if set, then D before X
+        # Check if both events occurred first
         d_times = self.D_timestamps
         x_times = self.X_timestamps
-
-        # Both must have occurred
         has_both = ~np.isnat(d_times) & ~np.isnat(x_times)
 
-        # D before X
+        # Use pair_mask: bit 10 set means D before X
         result: np.ndarray = np.zeros(len(self), dtype=bool)
-        result[has_both] = d_times[has_both] < x_times[has_both]
+        result[has_both] = (self.pair_mask[has_both] & (1 << 10)) != 0
         return result
 
     @property
@@ -719,6 +721,8 @@ class CVDArray:
         True if D event occurred before A event. Indicates fix was
         deployed before attacks were observed.
 
+        Uses precomputed pair_mask for O(1) lookup (bit 11: D≺A).
+
         Returns:
             Boolean array indicating deployment-before-attack status
 
@@ -726,15 +730,15 @@ class CVDArray:
             >>> arr.has_deployment_before_attack
             array([True, False, True, ...], dtype=bool)
         """
+        # D≺A (bit 11): if set, then D before A
+        # Check if both events occurred first
         d_times = self.D_timestamps
         a_times = self.A_timestamps
-
-        # Both must have occurred
         has_both = ~np.isnat(d_times) & ~np.isnat(a_times)
 
-        # D before A
+        # Use pair_mask: bit 11 set means D before A
         result: np.ndarray = np.zeros(len(self), dtype=bool)
-        result[has_both] = d_times[has_both] < a_times[has_both]
+        result[has_both] = (self.pair_mask[has_both] & (1 << 11)) != 0
         return result
 
     @property
@@ -1224,6 +1228,10 @@ class CVDArray:
 
         # Clear dirty flags
         self._dirty_indices -= to_sync
+
+        # Mark pair_mask as dirty (timestamps changed)
+        if to_sync:
+            self._pair_mask_dirty = True
 
         return self
 
