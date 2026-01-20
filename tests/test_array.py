@@ -921,5 +921,240 @@ class TestFixedSizeSemantics:
         assert arr.is_fixed_size is False
 
 
+class TestNewAPIConsistencyProperties:
+    """Test new properties added for API consistency (v0.2.0)."""
+
+    def test_cve_ids_property_returns_array(self):
+        """Verify cve_ids property returns CVE ID array."""
+        v1 = CVDVulnerability('CVE-2024-001')
+        v2 = CVDVulnerability('CVE-2024-002')
+        v3 = CVDVulnerability('CVE-2024-003')
+        arr = CVDArray([v1, v2, v3])
+
+        cve_ids = arr.cve_ids
+        assert isinstance(cve_ids, np.ndarray)
+        assert len(cve_ids) == 3
+        assert cve_ids[0] == 'CVE-2024-001'
+        assert cve_ids[1] == 'CVE-2024-002'
+        assert cve_ids[2] == 'CVE-2024-003'
+
+    def test_cve_ids_can_be_used_for_filtering(self):
+        """Verify cve_ids can be used to filter vulnerabilities."""
+        v1 = CVDVulnerability('CVE-2024-001')
+        v2 = CVDVulnerability('CVE-2024-002')
+        v3 = CVDVulnerability('CVE-2024-003')
+        arr = CVDArray([v1, v2, v3])
+
+        mask = arr.cve_ids == 'CVE-2024-002'
+        filtered = arr[mask]
+
+        assert len(filtered) == 1
+        assert filtered.get(0).cve_id == 'CVE-2024-002'
+
+    def test_events_property_returns_dict(self):
+        """Verify events property returns dict of timestamp arrays."""
+        v1 = CVDVulnerability('CVE-2024-001')
+        v1.apply_event(CVDEvent.V)
+        v1.apply_event(CVDEvent.F)
+
+        arr = CVDArray([v1])
+        arr.sync()
+
+        events = arr.events
+        assert isinstance(events, dict)
+        assert CVDEvent.V in events
+        assert CVDEvent.F in events
+        assert isinstance(events[CVDEvent.V], np.ndarray)
+
+    def test_events_dict_matches_exploded_timestamps(self):
+        """Verify arr.events matches exploded timestamp properties."""
+        v1 = CVDVulnerability('CVE-2024-001')
+        v1.apply_event(CVDEvent.V)
+        v2 = CVDVulnerability('CVE-2024-002')
+        v2.apply_event(CVDEvent.F)
+
+        arr = CVDArray([v1, v2])
+        arr.sync()
+
+        # Use 'is' comparison for same array object reference
+        assert arr.events[CVDEvent.V] is arr.V_timestamps
+        assert arr.events[CVDEvent.F] is arr.F_timestamps
+        assert arr.events[CVDEvent.D] is arr.D_timestamps
+        assert arr.events[CVDEvent.P] is arr.P_timestamps
+        assert arr.events[CVDEvent.X] is arr.X_timestamps
+        assert arr.events[CVDEvent.A] is arr.A_timestamps
+
+    def test_is_zero_day_exploit_true_when_x_before_v(self):
+        """Verify is_zero_day_exploit true when X before V."""
+        from datetime import datetime, timedelta
+        base = datetime(2024, 1, 1)
+
+        v = CVDVulnerability('CVE-2024-001')
+        v.apply_event(CVDEvent.X, timestamp=base)
+        v.apply_event(CVDEvent.V, timestamp=base + timedelta(days=5))
+
+        arr = CVDArray([v])
+        arr.sync()
+
+        assert arr.is_zero_day_exploit[0] == True
+
+    def test_is_zero_day_attack_true_when_a_before_v(self):
+        """Verify is_zero_day_attack true when A before V."""
+        from datetime import datetime, timedelta
+        base = datetime(2024, 1, 1)
+
+        v = CVDVulnerability('CVE-2024-001')
+        v.apply_event(CVDEvent.A, timestamp=base)
+        v.apply_event(CVDEvent.V, timestamp=base + timedelta(days=3))
+
+        arr = CVDArray([v])
+        arr.sync()
+
+        assert arr.is_zero_day_attack[0] == True
+
+    def test_is_coordinated_true_when_v_before_p(self):
+        """Verify is_coordinated true when V before P."""
+        from datetime import datetime, timedelta
+        base = datetime(2024, 1, 1)
+
+        v = CVDVulnerability('CVE-2024-001')
+        v.apply_event(CVDEvent.V, timestamp=base)
+        v.apply_event(CVDEvent.P, timestamp=base + timedelta(days=30))
+
+        arr = CVDArray([v])
+        arr.sync()
+
+        assert arr.is_coordinated[0] == True
+
+    def test_is_responsible_disclosure_true_when_v_f_p_ordered(self):
+        """Verify is_responsible_disclosure true when V→F→P."""
+        from datetime import datetime, timedelta
+        base = datetime(2024, 1, 1)
+
+        v = CVDVulnerability('CVE-2024-001')
+        v.apply_event(CVDEvent.V, timestamp=base)
+        v.apply_event(CVDEvent.F, timestamp=base + timedelta(days=10))
+        v.apply_event(CVDEvent.P, timestamp=base + timedelta(days=30))
+
+        arr = CVDArray([v])
+        arr.sync()
+
+        assert arr.is_responsible_disclosure[0] == True
+
+    def test_has_fix_before_exploit_true_when_f_before_x(self):
+        """Verify has_fix_before_exploit true when F before X."""
+        from datetime import datetime, timedelta
+        base = datetime(2024, 1, 1)
+
+        v = CVDVulnerability('CVE-2024-001')
+        v.apply_event(CVDEvent.V, timestamp=base)
+        v.apply_event(CVDEvent.F, timestamp=base + timedelta(days=10))
+        v.apply_event(CVDEvent.X, timestamp=base + timedelta(days=20))
+
+        arr = CVDArray([v])
+        arr.sync()
+
+        assert arr.has_fix_before_exploit[0] == True
+
+    def test_has_fix_before_attack_true_when_f_before_a(self):
+        """Verify has_fix_before_attack true when F before A."""
+        from datetime import datetime, timedelta
+        base = datetime(2024, 1, 1)
+
+        v = CVDVulnerability('CVE-2024-001')
+        v.apply_event(CVDEvent.V, timestamp=base)
+        v.apply_event(CVDEvent.F, timestamp=base + timedelta(days=10))
+        v.apply_event(CVDEvent.A, timestamp=base + timedelta(days=20))
+
+        arr = CVDArray([v])
+        arr.sync()
+
+        assert arr.has_fix_before_attack[0] == True
+
+    def test_has_deployment_before_exploit_true_when_d_before_x(self):
+        """Verify has_deployment_before_exploit true when D before X."""
+        from datetime import datetime, timedelta
+        base = datetime(2024, 1, 1)
+
+        v = CVDVulnerability('CVE-2024-001')
+        v.apply_event(CVDEvent.V, timestamp=base)
+        v.apply_event(CVDEvent.F, timestamp=base + timedelta(days=10))
+        v.apply_event(CVDEvent.D, timestamp=base + timedelta(days=15))
+        v.apply_event(CVDEvent.X, timestamp=base + timedelta(days=20))
+
+        arr = CVDArray([v])
+        arr.sync()
+
+        assert arr.has_deployment_before_exploit[0] == True
+
+    def test_has_deployment_before_attack_true_when_d_before_a(self):
+        """Verify has_deployment_before_attack true when D before A."""
+        from datetime import datetime, timedelta
+        base = datetime(2024, 1, 1)
+
+        v = CVDVulnerability('CVE-2024-001')
+        v.apply_event(CVDEvent.V, timestamp=base)
+        v.apply_event(CVDEvent.F, timestamp=base + timedelta(days=10))
+        v.apply_event(CVDEvent.D, timestamp=base + timedelta(days=15))
+        v.apply_event(CVDEvent.A, timestamp=base + timedelta(days=20))
+
+        arr = CVDArray([v])
+        arr.sync()
+
+        assert arr.has_deployment_before_attack[0] == True
+
+    def test_is_private_attack_true_when_a_without_x(self):
+        """Verify is_private_attack true when A without X."""
+        from datetime import datetime, timedelta
+        base = datetime(2024, 1, 1)
+
+        v = CVDVulnerability('CVE-2024-001')
+        v.apply_event(CVDEvent.V, timestamp=base)
+        v.apply_event(CVDEvent.A, timestamp=base + timedelta(days=5))
+
+        arr = CVDArray([v])
+        arr.sync()
+
+        assert arr.is_private_attack[0] == True
+        assert arr.is_weaponized[0] == False
+
+    def test_is_mass_exploitation_true_when_both_x_and_a(self):
+        """Verify is_mass_exploitation true when both X and A."""
+        from datetime import datetime, timedelta
+        base = datetime(2024, 1, 1)
+
+        v = CVDVulnerability('CVE-2024-001')
+        v.apply_event(CVDEvent.V, timestamp=base)
+        v.apply_event(CVDEvent.X, timestamp=base + timedelta(days=5))
+        v.apply_event(CVDEvent.A, timestamp=base + timedelta(days=10))
+
+        arr = CVDArray([v])
+        arr.sync()
+
+        assert arr.is_mass_exploitation[0] == True
+        assert arr.is_weaponized[0] == True
+        assert arr.is_under_attack[0] == True
+
+    def test_all_new_analytical_properties_return_boolean_arrays(self):
+        """Verify all new analytical properties return boolean arrays."""
+        v1 = CVDVulnerability('CVE-2024-001')
+        v2 = CVDVulnerability('CVE-2024-002')
+        arr = CVDArray([v1, v2])
+
+        props = [
+            'is_zero_day_exploit', 'is_zero_day_attack', 'is_coordinated',
+            'is_responsible_disclosure', 'has_fix_before_exploit',
+            'has_fix_before_attack', 'has_deployment_before_exploit',
+            'has_deployment_before_attack', 'is_private_attack',
+            'is_mass_exploitation'
+        ]
+
+        for prop in props:
+            result = getattr(arr, prop)
+            assert isinstance(result, np.ndarray), f"{prop} should return ndarray"
+            assert result.dtype == bool, f"{prop} should return bool array"
+            assert len(result) == 2, f"{prop} should have length 2"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
