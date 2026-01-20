@@ -431,6 +431,267 @@ class CVDArray:
         return self.analysis.is_premature_disclosure
 
     @property
+    def is_zero_day_exploit(self) -> np.ndarray:
+        """
+        Check if exploit public before vendor awareness (zero-day exploit).
+
+        True if X event occurred before V event. Indicates attacker had
+        working exploit before vendor knew vulnerability existed.
+
+        Returns:
+            Boolean array indicating zero-day exploit status
+
+        Examples:
+            >>> arr.is_zero_day_exploit
+            array([False, True, False, ...], dtype=bool)
+        """
+        v_times = self.V_timestamps
+        x_times = self.X_timestamps
+
+        # Both must have occurred
+        has_both = ~np.isnat(v_times) & ~np.isnat(x_times)
+
+        # X before V
+        result = np.zeros(len(self), dtype=bool)
+        result[has_both] = x_times[has_both] < v_times[has_both]
+        return result
+
+    @property
+    def is_zero_day_attack(self) -> np.ndarray:
+        """
+        Check if attacks before vendor awareness (zero-day attack).
+
+        True if A event occurred before V event. Indicates attacks were
+        observed before vendor knew vulnerability existed.
+
+        Returns:
+            Boolean array indicating zero-day attack status
+
+        Examples:
+            >>> arr.is_zero_day_attack
+            array([False, True, False, ...], dtype=bool)
+        """
+        v_times = self.V_timestamps
+        a_times = self.A_timestamps
+
+        # Both must have occurred
+        has_both = ~np.isnat(v_times) & ~np.isnat(a_times)
+
+        # A before V
+        result = np.zeros(len(self), dtype=bool)
+        result[has_both] = a_times[has_both] < v_times[has_both]
+        return result
+
+    @property
+    def is_coordinated(self) -> np.ndarray:
+        """
+        Check if vendor aware before public disclosure (coordinated disclosure).
+
+        True if V event occurred before P event. Indicates proper coordination
+        where vendor had awareness before public disclosure.
+
+        Returns:
+            Boolean array indicating coordinated disclosure status
+
+        Examples:
+            >>> arr.is_coordinated
+            array([True, False, True, ...], dtype=bool)
+        """
+        v_times = self.V_timestamps
+        p_times = self.P_timestamps
+
+        # Both must have occurred
+        has_both = ~np.isnat(v_times) & ~np.isnat(p_times)
+
+        # V before P
+        result = np.zeros(len(self), dtype=bool)
+        result[has_both] = v_times[has_both] < p_times[has_both]
+        return result
+
+    @property
+    def is_responsible_disclosure(self) -> np.ndarray:
+        """
+        Check if V→F→P ordering maintained (responsible disclosure).
+
+        True if vendor awareness (V) preceded fix ready (F) which preceded
+        public disclosure (P). This is the ideal disclosure sequence.
+
+        Returns:
+            Boolean array indicating responsible disclosure status
+
+        Examples:
+            >>> arr.is_responsible_disclosure
+            array([True, False, True, ...], dtype=bool)
+        """
+        v_times = self.V_timestamps
+        f_times = self.F_timestamps
+        p_times = self.P_timestamps
+
+        # All three must have occurred
+        has_all = ~np.isnat(v_times) & ~np.isnat(f_times) & ~np.isnat(p_times)
+
+        # V before F before P
+        result = np.zeros(len(self), dtype=bool)
+        v_before_f = v_times[has_all] < f_times[has_all]
+        f_before_p = f_times[has_all] < p_times[has_all]
+        result[has_all] = v_before_f & f_before_p
+        return result
+
+    @property
+    def has_fix_before_exploit(self) -> np.ndarray:
+        """
+        Check if fix ready before exploit public.
+
+        True if F event occurred before X event. Indicates vendor had
+        fix ready before exploit became publicly available.
+
+        Returns:
+            Boolean array indicating fix-before-exploit status
+
+        Examples:
+            >>> arr.has_fix_before_exploit
+            array([True, False, True, ...], dtype=bool)
+        """
+        f_times = self.F_timestamps
+        x_times = self.X_timestamps
+
+        # Both must have occurred
+        has_both = ~np.isnat(f_times) & ~np.isnat(x_times)
+
+        # F before X
+        result = np.zeros(len(self), dtype=bool)
+        result[has_both] = f_times[has_both] < x_times[has_both]
+        return result
+
+    @property
+    def has_fix_before_attack(self) -> np.ndarray:
+        """
+        Check if fix ready before attacks observed.
+
+        True if F event occurred before A event. Indicates vendor had
+        fix ready before attacks were observed.
+
+        Returns:
+            Boolean array indicating fix-before-attack status
+
+        Examples:
+            >>> arr.has_fix_before_attack
+            array([True, False, True, ...], dtype=bool)
+        """
+        f_times = self.F_timestamps
+        a_times = self.A_timestamps
+
+        # Both must have occurred
+        has_both = ~np.isnat(f_times) & ~np.isnat(a_times)
+
+        # F before A
+        result = np.zeros(len(self), dtype=bool)
+        result[has_both] = f_times[has_both] < a_times[has_both]
+        return result
+
+    @property
+    def has_deployment_before_exploit(self) -> np.ndarray:
+        """
+        Check if fix deployed before exploit public.
+
+        True if D event occurred before X event. Indicates fix was
+        deployed before exploit became publicly available.
+
+        Returns:
+            Boolean array indicating deployment-before-exploit status
+
+        Examples:
+            >>> arr.has_deployment_before_exploit
+            array([True, False, True, ...], dtype=bool)
+        """
+        d_times = self.D_timestamps
+        x_times = self.X_timestamps
+
+        # Both must have occurred
+        has_both = ~np.isnat(d_times) & ~np.isnat(x_times)
+
+        # D before X
+        result = np.zeros(len(self), dtype=bool)
+        result[has_both] = d_times[has_both] < x_times[has_both]
+        return result
+
+    @property
+    def has_deployment_before_attack(self) -> np.ndarray:
+        """
+        Check if fix deployed before attacks observed.
+
+        True if D event occurred before A event. Indicates fix was
+        deployed before attacks were observed.
+
+        Returns:
+            Boolean array indicating deployment-before-attack status
+
+        Examples:
+            >>> arr.has_deployment_before_attack
+            array([True, False, True, ...], dtype=bool)
+        """
+        d_times = self.D_timestamps
+        a_times = self.A_timestamps
+
+        # Both must have occurred
+        has_both = ~np.isnat(d_times) & ~np.isnat(a_times)
+
+        # D before A
+        result = np.zeros(len(self), dtype=bool)
+        result[has_both] = d_times[has_both] < a_times[has_both]
+        return result
+
+    @property
+    def is_private_attack(self) -> np.ndarray:
+        """
+        Check if attacks without public exploit (targeted/private attack).
+
+        True if A event occurred without X event. Indicates targeted
+        attacks without publicly available exploit code.
+
+        Returns:
+            Boolean array indicating private attack status
+
+        Examples:
+            >>> arr.is_private_attack
+            array([False, True, False, ...], dtype=bool)
+        """
+        x_times = self.X_timestamps
+        a_times = self.A_timestamps
+
+        # A occurred but not X
+        has_a = ~np.isnat(a_times)
+        has_x = ~np.isnat(x_times)
+
+        result = has_a & ~has_x
+        return result
+
+    @property
+    def is_mass_exploitation(self) -> np.ndarray:
+        """
+        Check if both exploit public and attacks observed (mass exploitation).
+
+        True if both X and A events occurred. Indicates widespread
+        exploitation with both public exploit code and observed attacks.
+
+        Returns:
+            Boolean array indicating mass exploitation status
+
+        Examples:
+            >>> arr.is_mass_exploitation
+            array([False, True, False, ...], dtype=bool)
+        """
+        x_times = self.X_timestamps
+        a_times = self.A_timestamps
+
+        # Both X and A occurred
+        has_x = ~np.isnat(x_times)
+        has_a = ~np.isnat(a_times)
+
+        result = has_x & has_a
+        return result
+
+    @property
     def disclosure_window_days(self) -> np.ndarray:
         """Get disclosure_window_days analytics array.
 
