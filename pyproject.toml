@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vulnstate"
-version = "0.1.0"
+version = "0.2.0"
 description = "SEI/CMU Coordinated Vulnerability Disclosure (CVD) state machine with numpy optimization for batch operations"
 authors = [{name = "Francesco Manzoni", email = "francesco.manzoni@outlook.com"}]
 readme = "README.md"

@@ -48,7 +48,7 @@ from .formatting import CVDFormatter
 from .models import AnalysisResult
 from .vulnerability import TIMESTAMP_UNKNOWN, CVDVulnerability
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     # Core classes

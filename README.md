@@ -10,7 +10,7 @@ Based on: *"A State-Based Model for Multi-Party Coordinated Vulnerability Disclo
 - **Performance**: Vectorized batch operations via numpy
 - **Analytics**: Zero-day detection, coordination quality, fix effectiveness metrics
 - **Type Safe**: Full type hints with mypy --strict validation
-- **Well Tested**: 350+ tests with comprehensive coverage
+- **Well Tested**: 369 tests with comprehensive coverage
 
 ## Installation
 
@@ -46,14 +46,24 @@ print(vuln.is_coordinated)    # True - V before P
 
 ```python
 from vulnstate import CVDArray, CVDEvent
+import numpy as np
 
 # Create from list
-vulns = [CVDVulnerability(f'CVE-{i}') for i in range(1000)]
+vulns = [CVDVulnerability(f'CVE-2024-{i:03d}') for i in range(1000)]
 arr = CVDArray(vulns)
 
 # Or use factory methods
 arr = CVDArray.zeros(1000)   # All at initial state
 arr = CVDArray.random(1000, seed=42)  # Random states
+
+# Filter by CVE ID (primary identifier)
+mask = arr.cve_ids == 'CVE-2024-001'
+critical = arr[mask]
+
+# Filter multiple CVEs
+target_cves = ['CVE-2024-001', 'CVE-2024-002', 'CVE-2024-003']
+mask = np.isin(arr.cve_ids, target_cves)
+selected = arr[mask]
 
 # Vectorized queries
 v_mask = arr.has_event_occurred(CVDEvent.V)
@@ -69,21 +79,36 @@ print(arr.count_by_state())
 ### Analytics
 
 ```python
-from vulnstate import CVDAnalyzer
+from vulnstate import CVDAnalyzer, CVDEvent
 
-# Analyze batch
+# Analyze batch with CVDAnalyzer
 result = CVDAnalyzer.analyze(arr)
-
-# Access computed metrics
-print(result.is_zero_day)        # bool array
-print(result.is_coordinated)     # bool array
 print(result.desiderata_score)   # float array (0-1)
 print(result.fix_lag_days)       # float array
 
-# Single vulnerability
+# Or use direct analytical properties on CVDArray
+high_priority = arr[
+    arr.is_zero_day_exploit |           # Exploit before vendor aware
+    arr.is_mass_exploitation |          # Both exploit and attacks
+    (arr.kev & ~arr.has_fix_before_exploit)  # KEV without fix
+]
+
+# Timestamp access (dict-style, matches CVDVulnerability.events)
+v_times = arr.events[CVDEvent.V]  # Same as arr.V_timestamps
+p_times = arr.events[CVDEvent.P]  # Same as arr.P_timestamps
+
+# Advanced analytics (all available on both CVDVulnerability and CVDArray)
+print(arr.is_zero_day_exploit)    # Exploit before vendor aware
+print(arr.is_coordinated)         # Vendor aware before public
+print(arr.is_responsible_disclosure)  # V→F→P ordering maintained
+print(arr.has_fix_before_exploit) # Fix ready before exploit
+print(arr.is_private_attack)      # Attacks without public exploit
+
+# Single vulnerability - same properties
 vuln = CVDVulnerability('CVE-2024-001')
 vuln.apply_event(CVDEvent.X)  # Exploit first = zero-day
-print(vuln.is_zero_day)  # True
+print(vuln.is_zero_day)       # True
+print(vuln.is_zero_day_exploit)  # True
 ```
 
 ### Data Import
@@ -162,9 +187,9 @@ Events:
 32 valid states (out of 64 possible)
 ```
 
-### Convenience Properties
+### Analytical Properties
 
-CVDVulnerability provides 13 cached boolean properties:
+Both CVDVulnerability and CVDArray provide analytical properties for vulnerability assessment:
 
 ```python
 # Zero-Day indicators
@@ -174,8 +199,8 @@ vuln.is_zero_day_attack     # A before V
 
 # Coordination quality
 vuln.is_coordinated         # V before P
-vuln.is_responsible_disclosure
-vuln.is_premature_disclosure
+vuln.is_responsible_disclosure  # V→F→P ordering
+vuln.is_premature_disclosure    # Public before vendor aware
 
 # Fix effectiveness
 vuln.has_fix_before_exploit
@@ -184,9 +209,15 @@ vuln.has_deployment_before_exploit
 vuln.has_deployment_before_attack
 
 # Threat characteristics
-vuln.is_private_attack      # A without X
+vuln.is_private_attack      # A without X (targeted attacks)
 vuln.is_weaponized          # X occurred
-vuln.is_mass_exploitation   # X and A both
+vuln.is_mass_exploitation   # X and A both (widespread)
+
+# Same properties available on CVDArray (returns boolean arrays)
+arr.is_zero_day_exploit     # np.ndarray[bool]
+arr.is_coordinated          # np.ndarray[bool]
+arr.has_fix_before_exploit  # np.ndarray[bool]
+# ... all properties above
 ```
 
 ## Examples
