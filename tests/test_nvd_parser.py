@@ -13,8 +13,6 @@ Coverage:
 - Integration with CVDArray
 """
 
-import json
-from datetime import datetime
 
 import pytest
 

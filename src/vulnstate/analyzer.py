@@ -47,7 +47,7 @@ class CVDAnalyzer:
             arr: CVDArray to analyze
         """
         self._arr = arr
-        self.states = arr.states
+        self.states = arr.state_ints
         self.timestamps = arr.timestamps
         self.n = len(arr)
 
@@ -290,7 +290,7 @@ class CVDAnalyzer:
         self._inferred_mask[infer_mask] |= 1 << target_bit
 
         # Update array states
-        self._arr.states[infer_mask] |= 1 << target_bit
+        self._arr.state_ints[infer_mask] |= 1 << target_bit
 
     @staticmethod
     def analyze(arr: "CVDArray", infer: bool = True) -> "AnalysisResult":
@@ -436,7 +436,7 @@ class CVDAnalyzer:
 
         # ==================== Group 10: Transitions ====================
         # Can transition if event hasn't occurred yet
-        can_transition_mask = ~arr.states & 0b111111
+        can_transition_mask = ~arr.state_ints & 0b111111
 
         # ==================== Group 11: Probabilities ====================
         # Placeholder - these would need EPSS or other external data

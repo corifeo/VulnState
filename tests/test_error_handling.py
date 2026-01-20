@@ -109,7 +109,7 @@ class TestFactoryMethods:
         arr = CVDArray.zeros(5, vuln_id_prefix="ZERO")
         assert len(arr) == 5
 
-        states = set(arr.states_as_strings)
+        states = set(arr.states)
         assert states == {"vfdpxa"}
 
     def test_ones_creates_terminal_state(self):
@@ -117,7 +117,7 @@ class TestFactoryMethods:
         arr = CVDArray.ones(5, vuln_id_prefix="TERM")
         assert len(arr) == 5
 
-        states = set(arr.states_as_strings)
+        states = set(arr.states)
         assert states == {"VFDPXA"}
 
     def test_random_creates_valid_states(self):
@@ -126,5 +126,5 @@ class TestFactoryMethods:
         assert len(arr) == 10
 
         # All states should be non-empty strings
-        states = arr.states_as_strings
+        states = arr.states
         assert all(len(s) == 6 for s in states)

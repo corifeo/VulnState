@@ -17,7 +17,7 @@ def test_analyzer_init():
     analyzer = CVDAnalyzer(arr)
 
     assert analyzer.n == 10
-    assert analyzer.states is arr.states
+    assert analyzer.states is arr.state_ints
 
 
 def test_analyzer_fix_path():
