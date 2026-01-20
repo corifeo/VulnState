@@ -38,7 +38,16 @@ from .constants import (
     state_int_to_string,
     string_to_state_int,
 )
-from .models import ArrayAnalytics, ArrayCoreData, ArrayMetadata, ArrayTimestamps
+from .models import (
+    ArrayAnalytics,
+    ArrayCoreData,
+    ArrayEnrichment,
+    ArrayEventOrders,
+    ArrayHistories,
+    ArrayMetadata,
+    ArrayScoring,
+    ArrayTimestamps,
+)
 from .vulnerability import CVDVulnerability
 
 
@@ -88,6 +97,10 @@ class CVDArray:
         self.timestamps = ArrayTimestamps()
         self.analytics = ArrayAnalytics()
         self._metadata_data = ArrayMetadata()
+        self.scoring = ArrayScoring()
+        self.enrichment = ArrayEnrichment()
+        self.histories = ArrayHistories()
+        self.event_orders = ArrayEventOrders()
 
         # Metadata encoders (for categorical optimization - not yet implemented)
         self._metadata_encoders: dict[str, Any] = {}
@@ -182,6 +195,34 @@ class CVDArray:
         ]
         self._metadata_data.raw["cvss_score"] = np.array(cvss_scores, dtype=np.float32)
 
+        # Extract scoring data
+        from .parsers import NVDParser
+        self.scoring.cvss_score = np.array([
+            v.scoring.cvss_base_score if v.scoring.cvss_base_score is not None else np.nan
+            for v in vulnerabilities
+        ], dtype=np.float32)
+
+        # Parse CVSS vectors and extract metrics
+        cvss_metrics = [NVDParser.parse_cvss_vector(v.scoring.cve_vector) for v in vulnerabilities]
+        self.scoring.attack_vector = np.array([m['AV'] for m in cvss_metrics], dtype=object)
+        self.scoring.attack_complexity = np.array([m['AC'] for m in cvss_metrics], dtype=object)
+        self.scoring.privileges_required = np.array([m['PR'] for m in cvss_metrics], dtype=object)
+        self.scoring.user_interaction = np.array([m['UI'] for m in cvss_metrics], dtype=object)
+        self.scoring.scope = np.array([m['S'] for m in cvss_metrics], dtype=object)
+        self.scoring.confidentiality_impact = np.array([m['C'] for m in cvss_metrics], dtype=object)
+        self.scoring.integrity_impact = np.array([m['I'] for m in cvss_metrics], dtype=object)
+        self.scoring.availability_impact = np.array([m['A'] for m in cvss_metrics], dtype=object)
+
+        # Extract enrichment data
+        self.enrichment.epss = np.array([
+            v.enrichment.epss if v.enrichment.epss is not None else np.nan
+            for v in vulnerabilities
+        ], dtype=np.float32)
+
+        self.enrichment.kev = np.array([
+            v.enrichment.is_kev for v in vulnerabilities
+        ], dtype=bool)
+
         # Extract EPSS scores from enrichment dataclass
         epss_scores = [
             v.enrichment.epss if v.enrichment.epss is not None else np.nan for v in vulnerabilities
@@ -211,6 +252,61 @@ class CVDArray:
                 except (ValueError, TypeError):
                     self._metadata_data.raw[key] = np.array(values, dtype=object)
 
+        # Extract histories (1D with offsets for compact storage)
+        all_events = []
+        all_from_states = []
+        all_to_states = []
+        all_timestamps = []
+        offsets = [0]
+
+        for vuln in vulnerabilities:
+            history = vuln.history
+            for entry in history:
+                # event: CVDEvent or None → int8 (-1 for None)
+                evt = entry['event'].value if entry['event'] is not None else -1
+                all_events.append(evt)
+
+                # from_state: 'INIT' or state string → uint8 (255 for INIT)
+                from_st = entry['from_state']
+                if from_st == 'INIT':
+                    all_from_states.append(255)
+                else:
+                    all_from_states.append(string_to_state_int(from_st))
+
+                # to_state: state string or None → uint8 (255 for None)
+                to_st = entry.get('to_state')
+                if to_st is None or to_st == 'INIT':
+                    all_to_states.append(255)
+                else:
+                    all_to_states.append(string_to_state_int(to_st))
+
+                # timestamp
+                ts = entry.get('timestamp')
+                if ts:
+                    all_timestamps.append(np.datetime64(ts, 'us'))
+                else:
+                    all_timestamps.append(np.datetime64('NaT'))
+
+            offsets.append(len(all_events))
+
+        self.histories.events = np.array(all_events, dtype=np.int8)
+        self.histories.from_states = np.array(all_from_states, dtype=np.uint8)
+        self.histories.to_states = np.array(all_to_states, dtype=np.uint8)
+        self.histories.timestamps = np.array(all_timestamps, dtype='datetime64[us]')
+        self.histories.offsets = np.array(offsets, dtype=np.int32)
+
+        # Extract event orders (1D with offsets for compact storage)
+        all_orders = []
+        order_offsets = [0]
+
+        for vuln in vulnerabilities:
+            order = vuln.event_order  # list[CVDEvent]
+            all_orders.extend([evt.value for evt in order])
+            order_offsets.append(len(all_orders))
+
+        self.event_orders.events = np.array(all_orders, dtype=np.int8)
+        self.event_orders.offsets = np.array(order_offsets, dtype=np.int32)
+
         # Restore fixed_size flag (preserve during rebuilds)
         self._fixed_size = was_fixed
 
@@ -218,7 +314,7 @@ class CVDArray:
 
     def __len__(self) -> int:
         """Number of vulnerabilities in array."""
-        return len(self.states)
+        return len(self.state_ints)
 
     def __repr__(self) -> str:
         """Developer-friendly representation."""
@@ -252,13 +348,13 @@ class CVDArray:
     # ==================== DATACLASS PROPERTY ACCESSORS ====================
 
     @property
-    def states(self) -> np.ndarray:
-        """Get states array."""
+    def state_ints(self) -> np.ndarray:
+        """Get states array as integers."""
         return self.core.states
 
-    @states.setter
-    def states(self, value: np.ndarray) -> None:
-        """Set states array."""
+    @state_ints.setter
+    def state_ints(self, value: np.ndarray) -> None:
+        """Set states array as integers."""
         self.core.states = value
 
     @property
@@ -452,7 +548,7 @@ class CVDArray:
         has_both = ~np.isnat(v_times) & ~np.isnat(x_times)
 
         # X before V
-        result = np.zeros(len(self), dtype=bool)
+        result: np.ndarray = np.zeros(len(self), dtype=bool)
         result[has_both] = x_times[has_both] < v_times[has_both]
         return result
 
@@ -478,7 +574,7 @@ class CVDArray:
         has_both = ~np.isnat(v_times) & ~np.isnat(a_times)
 
         # A before V
-        result = np.zeros(len(self), dtype=bool)
+        result: np.ndarray = np.zeros(len(self), dtype=bool)
         result[has_both] = a_times[has_both] < v_times[has_both]
         return result
 
@@ -504,7 +600,7 @@ class CVDArray:
         has_both = ~np.isnat(v_times) & ~np.isnat(p_times)
 
         # V before P
-        result = np.zeros(len(self), dtype=bool)
+        result: np.ndarray = np.zeros(len(self), dtype=bool)
         result[has_both] = v_times[has_both] < p_times[has_both]
         return result
 
@@ -531,7 +627,7 @@ class CVDArray:
         has_all = ~np.isnat(v_times) & ~np.isnat(f_times) & ~np.isnat(p_times)
 
         # V before F before P
-        result = np.zeros(len(self), dtype=bool)
+        result: np.ndarray = np.zeros(len(self), dtype=bool)
         v_before_f = v_times[has_all] < f_times[has_all]
         f_before_p = f_times[has_all] < p_times[has_all]
         result[has_all] = v_before_f & f_before_p
@@ -559,7 +655,7 @@ class CVDArray:
         has_both = ~np.isnat(f_times) & ~np.isnat(x_times)
 
         # F before X
-        result = np.zeros(len(self), dtype=bool)
+        result: np.ndarray = np.zeros(len(self), dtype=bool)
         result[has_both] = f_times[has_both] < x_times[has_both]
         return result
 
@@ -585,7 +681,7 @@ class CVDArray:
         has_both = ~np.isnat(f_times) & ~np.isnat(a_times)
 
         # F before A
-        result = np.zeros(len(self), dtype=bool)
+        result: np.ndarray = np.zeros(len(self), dtype=bool)
         result[has_both] = f_times[has_both] < a_times[has_both]
         return result
 
@@ -611,7 +707,7 @@ class CVDArray:
         has_both = ~np.isnat(d_times) & ~np.isnat(x_times)
 
         # D before X
-        result = np.zeros(len(self), dtype=bool)
+        result: np.ndarray = np.zeros(len(self), dtype=bool)
         result[has_both] = d_times[has_both] < x_times[has_both]
         return result
 
@@ -637,7 +733,7 @@ class CVDArray:
         has_both = ~np.isnat(d_times) & ~np.isnat(a_times)
 
         # D before A
-        result = np.zeros(len(self), dtype=bool)
+        result: np.ndarray = np.zeros(len(self), dtype=bool)
         result[has_both] = d_times[has_both] < a_times[has_both]
         return result
 
@@ -663,7 +759,7 @@ class CVDArray:
         has_a = ~np.isnat(a_times)
         has_x = ~np.isnat(x_times)
 
-        result = has_a & ~has_x
+        result: np.ndarray = has_a & ~has_x
         return result
 
     @property
@@ -688,7 +784,7 @@ class CVDArray:
         has_x = ~np.isnat(x_times)
         has_a = ~np.isnat(a_times)
 
-        result = has_x & has_a
+        result: np.ndarray = has_x & has_a
         return result
 
     @property
@@ -883,7 +979,7 @@ class CVDArray:
         elif isinstance(idx, (slice, list, np.ndarray)):
             # Return subset as new CVDArray
             subset = CVDArray()
-            subset.states = self.states[idx]
+            subset.state_ints = self.state_ints[idx]
             subset.vuln_ids = self.vuln_ids[idx]
             subset._vulnerabilities = self._vulnerabilities[idx]
 
@@ -953,7 +1049,7 @@ class CVDArray:
             Boolean array of shape (N,) where True = event occurred
         """
         bit_pos = event
-        return (self.states & (1 << bit_pos)) != 0
+        return (self.state_ints & (1 << bit_pos)) != 0
 
     @property
     def terminal_mask(self) -> np.ndarray:
@@ -963,17 +1059,33 @@ class CVDArray:
         Returns:
             Boolean array of shape (N,)
         """
-        return self.states == 0b111111
+        return self.state_ints == 0b111111
 
     @property
-    def states_as_strings(self) -> np.ndarray:
+    def states(self) -> np.ndarray:
         """
         All states as string array.
 
         Returns:
             np.ndarray of shape (N,) with dtype=object, values are state strings
         """
-        return np.array([state_int_to_string(s) for s in self.states], dtype=object)
+        return np.array([state_int_to_string(s) for s in self.state_ints], dtype=object)
+
+    @property
+    def state_labels(self) -> np.ndarray:
+        """
+        All state labels as string array (announced events only).
+
+        Returns:
+            np.ndarray of shape (N,) with dtype=object, values are state labels
+
+        Example:
+            >>> arr.states  # Full state strings
+            array(['VFdpxa', 'VFdpxa', 'VFDPXA'], dtype=object)
+            >>> arr.state_labels  # Announced events only
+            array(['VF', 'VF', 'VFDPXA'], dtype=object)
+        """
+        return np.array([get_state_label(state_int_to_string(s)) for s in self.state_ints], dtype=object)
 
     def count_by_state(self) -> dict[str, int]:
         """
@@ -982,7 +1094,7 @@ class CVDArray:
         Returns:
             Dictionary mapping state strings to counts
         """
-        unique_states, counts = np.unique(self.states, return_counts=True)
+        unique_states, counts = np.unique(self.state_ints, return_counts=True)
         return {
             state_int_to_string(state): int(count) for state, count in zip(unique_states, counts)
         }
@@ -1030,7 +1142,7 @@ class CVDArray:
             {'VF': 2, 'VFDPXA': 1}
         """
         label_counts: dict[str, int] = {}
-        state_strings = self.states_as_strings
+        state_strings = self.states
         for state_str in state_strings:
             label = get_state_label(state_str)
             label_counts[label] = label_counts.get(label, 0) + 1
@@ -1220,7 +1332,7 @@ class CVDArray:
 
         # Apply event by setting bit
         bit_pos = event
-        self.states[mask] |= 1 << bit_pos
+        self.state_ints[mask] |= 1 << bit_pos
 
         # Update timestamps - always update _event_timestamps_absolute
         # (if in delta mode, optimization will be re-applied by user)
@@ -1292,7 +1404,7 @@ class CVDArray:
             vulnerabilities.append(vuln)
 
         arr._vulnerabilities = np.array(vulnerabilities, dtype=object)
-        arr.states = states
+        arr.state_ints = states
         arr.vuln_ids = np.array(ids, dtype=object)
         arr._metadata_data.event_timestamps_absolute = {
             event: np.full(n, np.datetime64("NaT"), dtype="datetime64[us]") for event in CVDEvent
@@ -1841,3 +1953,62 @@ class CVDArray:
             )
             vulns.append(vuln)
         return cls(vulns, fixed_size=True)
+
+    # ==================== SCORING PROPERTIES ====================
+
+    @property
+    def cvss_scores(self) -> np.ndarray:
+        """CVSS base scores array."""
+        return self.scoring.cvss_score
+
+    @property
+    def attack_vector(self) -> np.ndarray:
+        """Attack Vector: N (Network), A (Adjacent), L (Local), P (Physical)."""
+        return self.scoring.attack_vector
+
+    @property
+    def attack_complexity(self) -> np.ndarray:
+        """Attack Complexity: L (Low), H (High)."""
+        return self.scoring.attack_complexity
+
+    @property
+    def privileges_required(self) -> np.ndarray:
+        """Privileges Required: N (None), L (Low), H (High)."""
+        return self.scoring.privileges_required
+
+    @property
+    def user_interaction(self) -> np.ndarray:
+        """User Interaction: N (None), R (Required)."""
+        return self.scoring.user_interaction
+
+    @property
+    def scope(self) -> np.ndarray:
+        """Scope: U (Unchanged), C (Changed)."""
+        return self.scoring.scope
+
+    @property
+    def confidentiality_impact(self) -> np.ndarray:
+        """Confidentiality Impact: N (None), L (Low), H (High)."""
+        return self.scoring.confidentiality_impact
+
+    @property
+    def integrity_impact(self) -> np.ndarray:
+        """Integrity Impact: N (None), L (Low), H (High)."""
+        return self.scoring.integrity_impact
+
+    @property
+    def availability_impact(self) -> np.ndarray:
+        """Availability Impact: N (None), L (Low), H (High)."""
+        return self.scoring.availability_impact
+
+    # ==================== ENRICHMENT PROPERTIES ====================
+
+    @property
+    def epss(self) -> np.ndarray:
+        """EPSS scores (0.0-1.0)."""
+        return self.enrichment.epss
+
+    @property
+    def kev(self) -> np.ndarray:
+        """CISA KEV flag."""
+        return self.enrichment.kev
