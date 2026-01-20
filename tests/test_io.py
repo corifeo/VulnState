@@ -1224,3 +1224,244 @@ def test_to_dataframe_basic():
     assert "V_timestamp" in df.columns
     assert len(df) == 2
     assert df.loc[0, "cve_id"] == "CVE-2024-0001"
+
+
+class TestDataFrameIntegration:
+    """Integration tests for DataFrame export (Phase 11)."""
+
+    def test_to_dataframe_includes_all_new_analytical_properties(self):
+        """Verify DataFrame export includes all 10 new analytical properties from Phase 5."""
+        from datetime import datetime, timedelta
+
+        base = datetime(2024, 1, 1)
+
+        # Create vulnerability with various events to trigger analytical properties
+        v1 = CVDVulnerability('CVE-2024-001')
+        v1.apply_event(CVDEvent.X, timestamp=base)  # Exploit before vendor awareness
+        v1.apply_event(CVDEvent.V, timestamp=base + timedelta(days=5))
+        v1.apply_event(CVDEvent.F, timestamp=base + timedelta(days=10))
+
+        v2 = CVDVulnerability('CVE-2024-002')
+        v2.apply_event(CVDEvent.V, timestamp=base)
+        v2.apply_event(CVDEvent.F, timestamp=base + timedelta(days=10))
+        v2.apply_event(CVDEvent.P, timestamp=base + timedelta(days=30))
+
+        arr = CVDArray([v1, v2])
+        df = arr.to_dataframe(include_analytics=True)
+
+        # Verify all 10 new analytical properties are present
+        new_properties = [
+            "is_zero_day_exploit",
+            "is_zero_day_attack",
+            "is_coordinated",
+            "is_responsible_disclosure",
+            "has_fix_before_exploit",
+            "has_fix_before_attack",
+            "has_deployment_before_exploit",
+            "has_deployment_before_attack",
+            "is_private_attack",
+            "is_mass_exploitation",
+        ]
+
+        for prop in new_properties:
+            assert prop in df.columns, f"Missing analytical property: {prop}"
+
+        # Verify values are correct for v1 (zero-day exploit case)
+        assert df.loc[0, "is_zero_day_exploit"], "v1 should have is_zero_day_exploit=True"
+
+        # Verify values are correct for v2 (coordinated disclosure case)
+        assert df.loc[1, "is_coordinated"], "v2 should have is_coordinated=True"
+        assert df.loc[1, "is_responsible_disclosure"], "v2 should have is_responsible_disclosure=True"
+
+    def test_to_dataframe_includes_original_analytical_properties(self):
+        """Verify DataFrame includes original analytical properties from before Phase 5."""
+        from datetime import datetime, timedelta
+
+        base = datetime(2024, 1, 1)
+
+        v = CVDVulnerability('CVE-2024-001')
+        v.apply_event(CVDEvent.V, timestamp=base)
+        v.apply_event(CVDEvent.F, timestamp=base + timedelta(days=10))
+        v.apply_event(CVDEvent.X, timestamp=base + timedelta(days=20))
+
+        arr = CVDArray([v])
+        df = arr.to_dataframe(include_analytics=True)
+
+        # Original analytical properties (before Phase 5)
+        original_properties = [
+            "is_fix_available",
+            "is_fix_deployed",
+            "is_weaponized",
+            "is_under_attack",
+            "is_premature_disclosure",
+            "disclosure_window_days",
+            "fix_lag_days",
+            "deployment_lag_days",
+        ]
+
+        for prop in original_properties:
+            assert prop in df.columns, f"Missing original analytical property: {prop}"
+
+    def test_to_dataframe_column_count_with_analytics(self):
+        """Verify DataFrame has expected number of columns with analytics enabled."""
+        arr = CVDArray.random(5, seed=42)
+        df = arr.to_dataframe(include_analytics=True, explode_cvss=False, explode_metadata=False)
+
+        # Expected columns:
+        # - cve_id, vuln_id, state, state_label (4 identity/state)
+        # - cvss_score, epss, kev (3 scoring/enrichment)
+        # - V_timestamp, F_timestamp, D_timestamp, P_timestamp, X_timestamp, A_timestamp (6 timestamps)
+        # - attack_vector, attack_complexity, privileges_required, user_interaction, scope,
+        #   confidentiality_impact, integrity_impact, availability_impact (8 CVSS metrics)
+        # - is_fix_available, is_fix_deployed, is_weaponized, is_under_attack,
+        #   is_premature_disclosure, disclosure_window_days, fix_lag_days, deployment_lag_days (8 original analytics)
+        # - is_zero_day_exploit, is_zero_day_attack, is_coordinated, is_responsible_disclosure,
+        #   has_fix_before_exploit, has_fix_before_attack, has_deployment_before_exploit,
+        #   has_deployment_before_attack, is_private_attack, is_mass_exploitation (10 new analytics)
+        # Total: 4 + 3 + 6 + 8 + 8 + 10 = 39 columns (plus metadata if present)
+
+        # At minimum, should have all the core analytical columns
+        assert len(df.columns) >= 35, f"Expected at least 35 columns, got {len(df.columns)}"
+
+        # Verify key columns are present
+        assert "cve_id" in df.columns
+        assert "state_label" in df.columns
+        assert "is_zero_day_exploit" in df.columns
+        assert "is_mass_exploitation" in df.columns
+
+    def test_to_dataframe_analytics_false_excludes_analytical_properties(self):
+        """Verify include_analytics=False excludes all analytical properties."""
+        arr = CVDArray.random(5, seed=42)
+        df = arr.to_dataframe(include_analytics=False, explode_cvss=False, explode_metadata=False)
+
+        # Should NOT have analytical properties
+        analytical_properties = [
+            "is_fix_available",
+            "is_zero_day_exploit",
+            "is_coordinated",
+            "has_fix_before_exploit",
+            "disclosure_window_days",
+        ]
+
+        for prop in analytical_properties:
+            assert prop not in df.columns, f"Should not have {prop} when include_analytics=False"
+
+        # Should still have identity and timestamp columns
+        assert "cve_id" in df.columns
+        assert "state" in df.columns
+        assert "V_timestamp" in df.columns
+
+    def test_to_dataframe_with_empty_array(self):
+        """Verify DataFrame export works with empty array."""
+        arr = CVDArray([])
+        df = arr.to_dataframe(include_analytics=True)
+
+        assert len(df) == 0, "Empty array should produce empty DataFrame"
+        # Empty array produces DataFrame with no columns (expected behavior)
+        # This is because array_to_dicts returns empty list -> pd.DataFrame([]) has no columns
+        assert len(df.columns) == 0
+
+    def test_to_dataframe_preserves_values_across_roundtrip(self):
+        """Verify serialization round-trip preserves new analytical property values."""
+        from datetime import datetime, timedelta
+
+        base = datetime(2024, 1, 1)
+
+        # Create vulnerability with specific analytical property values
+        v = CVDVulnerability('CVE-2024-001')
+        v.apply_event(CVDEvent.X, timestamp=base)
+        v.apply_event(CVDEvent.V, timestamp=base + timedelta(days=5))
+        v.apply_event(CVDEvent.F, timestamp=base + timedelta(days=10))
+        v.apply_event(CVDEvent.A, timestamp=base + timedelta(days=15))
+
+        arr = CVDArray([v])
+        arr.sync()
+
+        # Export to DataFrame
+        df = arr.to_dataframe(include_analytics=True)
+
+        # Verify analytical properties in DataFrame match array properties
+        assert df.loc[0, "is_zero_day_exploit"] == arr.is_zero_day_exploit[0]
+        assert df.loc[0, "is_zero_day_attack"] == arr.is_zero_day_attack[0]
+        assert df.loc[0, "has_fix_before_exploit"] == arr.has_fix_before_exploit[0]
+        assert df.loc[0, "has_fix_before_attack"] == arr.has_fix_before_attack[0]
+        assert df.loc[0, "is_mass_exploitation"] == arr.is_mass_exploitation[0]
+
+
+class TestSerializationRoundTrip:
+    """Test serialization round-trip preserves new properties (Phase 11)."""
+
+    def test_dict_roundtrip_preserves_analytical_property_inputs(self):
+        """Verify dict serialization preserves events that enable analytical properties."""
+        from datetime import datetime, timedelta
+
+        base = datetime(2024, 1, 1)
+
+        # Create vulnerability with events that trigger analytical properties
+        v1 = CVDVulnerability('CVE-2024-001')
+        v1.apply_event(CVDEvent.X, timestamp=base)
+        v1.apply_event(CVDEvent.V, timestamp=base + timedelta(days=5))
+        v1.apply_event(CVDEvent.F, timestamp=base + timedelta(days=10))
+
+        # Serialize to dict
+        data = v1.to_dict()
+
+        # Reconstruct from dict
+        v2 = CVDVulnerability.from_dict(data)
+
+        # Verify analytical properties are correctly recomputed
+        arr1 = CVDArray([v1])
+        arr2 = CVDArray([v2])
+
+        assert arr1.is_zero_day_exploit[0] == arr2.is_zero_day_exploit[0]
+        assert arr1.has_fix_before_exploit[0] == arr2.has_fix_before_exploit[0]
+
+    def test_json_roundtrip_preserves_analytical_property_inputs(self):
+        """Verify JSON serialization preserves events that enable analytical properties."""
+        from datetime import datetime, timedelta
+
+        base = datetime(2024, 1, 1)
+
+        v1 = CVDVulnerability('CVE-2024-001')
+        v1.apply_event(CVDEvent.V, timestamp=base)
+        v1.apply_event(CVDEvent.F, timestamp=base + timedelta(days=10))
+        v1.apply_event(CVDEvent.P, timestamp=base + timedelta(days=30))
+
+        # Serialize to JSON and back
+        json_str = v1.to_json()
+        v2 = CVDVulnerability.from_json(json_str)
+
+        # Verify analytical properties match
+        arr1 = CVDArray([v1])
+        arr2 = CVDArray([v2])
+
+        assert arr1.is_coordinated[0] == arr2.is_coordinated[0]
+        assert arr1.is_responsible_disclosure[0] == arr2.is_responsible_disclosure[0]
+
+    def test_array_dict_roundtrip_preserves_all_properties(self):
+        """Verify array serialization round-trip preserves all data."""
+        from datetime import datetime, timedelta
+
+        base = datetime(2024, 1, 1)
+
+        v1 = CVDVulnerability('CVE-2024-001')
+        v1.apply_event(CVDEvent.X, timestamp=base)
+        v1.apply_event(CVDEvent.V, timestamp=base + timedelta(days=5))
+        v1.apply_event(CVDEvent.A, timestamp=base + timedelta(days=10))
+
+        v2 = CVDVulnerability('CVE-2024-002')
+        v2.apply_event(CVDEvent.V, timestamp=base)
+        v2.apply_event(CVDEvent.F, timestamp=base + timedelta(days=10))
+        v2.apply_event(CVDEvent.X, timestamp=base + timedelta(days=20))
+
+        arr1 = CVDArray([v1, v2])
+
+        # Serialize and deserialize
+        dicts = CVDIO.array_to_dicts(arr1)
+        arr2 = CVDIO.array_from_dicts(dicts)
+
+        # Verify analytical properties match
+        assert np.array_equal(arr1.is_zero_day_exploit, arr2.is_zero_day_exploit)
+        assert np.array_equal(arr1.is_zero_day_attack, arr2.is_zero_day_attack)
+        assert np.array_equal(arr1.has_fix_before_exploit, arr2.has_fix_before_exploit)
+        assert np.array_equal(arr1.is_mass_exploitation, arr2.is_mass_exploitation)

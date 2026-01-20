@@ -528,6 +528,21 @@ class CVDIO:
         if "history" in df.columns:
             df = df.drop(columns=["history"])
 
+        # Add state labels (compressed state like 'VFP')
+        for i in range(len(arr)):
+            df.loc[i, "state_label"] = arr.state_labels[i]
+
+        # Add CVSS metrics
+        for i in range(len(arr)):
+            df.loc[i, "attack_vector"] = arr.attack_vector[i]
+            df.loc[i, "attack_complexity"] = arr.attack_complexity[i]
+            df.loc[i, "privileges_required"] = arr.privileges_required[i]
+            df.loc[i, "user_interaction"] = arr.user_interaction[i]
+            df.loc[i, "scope"] = arr.scope[i]
+            df.loc[i, "confidentiality_impact"] = arr.confidentiality_impact[i]
+            df.loc[i, "integrity_impact"] = arr.integrity_impact[i]
+            df.loc[i, "availability_impact"] = arr.availability_impact[i]
+
         # Add analytics if requested
         if include_analytics:
             for i in range(len(arr)):
@@ -539,6 +554,17 @@ class CVDIO:
                 df.loc[i, "disclosure_window_days"] = arr.disclosure_window_days[i]
                 df.loc[i, "fix_lag_days"] = arr.fix_lag_days[i]
                 df.loc[i, "deployment_lag_days"] = arr.deployment_lag_days[i]
+                # Phase 5 analytical properties
+                df.loc[i, "is_zero_day_exploit"] = arr.is_zero_day_exploit[i]
+                df.loc[i, "is_zero_day_attack"] = arr.is_zero_day_attack[i]
+                df.loc[i, "is_coordinated"] = arr.is_coordinated[i]
+                df.loc[i, "is_responsible_disclosure"] = arr.is_responsible_disclosure[i]
+                df.loc[i, "has_fix_before_exploit"] = arr.has_fix_before_exploit[i]
+                df.loc[i, "has_fix_before_attack"] = arr.has_fix_before_attack[i]
+                df.loc[i, "has_deployment_before_exploit"] = arr.has_deployment_before_exploit[i]
+                df.loc[i, "has_deployment_before_attack"] = arr.has_deployment_before_attack[i]
+                df.loc[i, "is_private_attack"] = arr.is_private_attack[i]
+                df.loc[i, "is_mass_exploitation"] = arr.is_mass_exploitation[i]
 
         # Explode CVSS vectors if requested
         if explode_cvss:
