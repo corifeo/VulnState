@@ -1007,7 +1007,7 @@ class TestKEVEventApplication:
         assert not arr.get(1).has_event_occurred(CVDEvent.A)
 
     def test_import_kev_without_event_application(self):
-        """KEV import with apply_event=False only sets is_kev flag."""
+        """KEV import with apply_event=False only sets kev flag."""
         arr = CVDArray([CVDVulnerability("CVE-2021-27104")])
 
         kev_data = {"CVE-2021-27104": {"dateAdded": "2021-11-03"}}

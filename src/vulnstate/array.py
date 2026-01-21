@@ -241,7 +241,7 @@ class CVDArray:
             dtype=np.float32,
         )
 
-        self.enrichment.kev = np.array([v.enrichment.is_kev for v in vulnerabilities], dtype=bool)
+        self.enrichment.kev = np.array([v.enrichment.kev for v in vulnerabilities], dtype=bool)
 
         self.enrichment.kev_date = np.array(
             [
@@ -261,9 +261,9 @@ class CVDArray:
         ]
         self._metadata_data.raw["epss"] = np.array(epss_scores, dtype=np.float32)
 
-        # Extract is_kev flags from enrichment dataclass
-        is_kev_flags = [v.enrichment.is_kev for v in vulnerabilities]
-        self._metadata_data.raw["is_kev"] = np.array(is_kev_flags, dtype=bool)
+        # Extract kev flags from enrichment dataclass
+        kev_flags = [v.enrichment.kev for v in vulnerabilities]
+        self._metadata_data.raw["kev"] = np.array(kev_flags, dtype=bool)
 
         # Extract cve_vector strings from scoring dataclass
         cve_vectors = [

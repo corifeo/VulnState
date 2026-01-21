@@ -124,9 +124,9 @@ class CVDIO:
 
         cve_ids = arr._metadata_raw["_cve_id"]
 
-        # Initialize is_kev metadata if needed
-        if "is_kev" not in arr._metadata_raw:
-            arr._metadata_raw["is_kev"] = np.full(len(arr), False, dtype=bool)
+        # Initialize kev metadata if needed
+        if "kev" not in arr._metadata_raw:
+            arr._metadata_raw["kev"] = np.full(len(arr), False, dtype=bool)
 
         # Process each vulnerability
         if arr._vulnerabilities is not None and len(arr._vulnerabilities) > 0:
@@ -138,8 +138,8 @@ class CVDIO:
                 vuln = arr.get(i)
                 kev_row = kev_data[cve_id]
 
-                # Set is_kev flag
-                arr._metadata_raw["is_kev"][i] = True
+                # Set kev flag
+                arr._metadata_raw["kev"][i] = True
                 vuln.kev = True
 
                 # Extract parsed KEV fields with kev_ prefix
@@ -251,11 +251,9 @@ class CVDIO:
                     elif "score" in metadata_dict:
                         vuln.epss = float(metadata_dict["score"])
 
-                    # Extract percentile to enrichment and metadata
+                    # Extract percentile to enrichment
                     if "percentile" in metadata_dict:
-                        percentile = float(metadata_dict["percentile"])
-                        vuln.enrichment.epss_percentile = percentile
-                        vuln.metadata["epss_percentile"] = percentile
+                        vuln.enrichment.epss_percentile = float(metadata_dict["percentile"])
                 else:
                     # Just set score (handle both "epss" and "score" keys for backward compatibility)
                     if isinstance(epss_value, float):
@@ -269,9 +267,7 @@ class CVDIO:
 
                     # Also extract percentile if it's a dict
                     if isinstance(epss_value, dict) and "percentile" in epss_value:
-                        percentile = float(epss_value["percentile"])
-                        vuln.enrichment.epss_percentile = percentile
-                        vuln.metadata["epss_percentile"] = percentile
+                        vuln.enrichment.epss_percentile = float(epss_value["percentile"])
         else:
             # TODO: Handle expunged _vulnerabilities
             pass
@@ -669,7 +665,7 @@ class CVDIO:
             "cvss_score": vuln.cvss_score,
             "epss": vuln.epss,
             "cve_vector": vuln.cve_vector,
-            "is_kev": vuln.kev,
+            "kev": vuln.kev,
             "event_timestamps": {
                 event.name: (
                     None
@@ -761,7 +757,7 @@ class CVDIO:
             cvss_base_score=data.get("cvss_score"), cve_vector=data.get("cve_vector")
         )
         vuln.enrichment = VulnerabilityEnrichmentData(
-            epss=data.get("epss"), is_kev=data.get("is_kev", False)
+            epss=data.get("epss"), kev=data.get("kev", False)
         )
         vuln.event_data = VulnerabilityEventData(
             state_encoded=string_to_state_int(data.get("state", "vfdpxa")),

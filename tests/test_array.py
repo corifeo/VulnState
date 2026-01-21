@@ -539,9 +539,9 @@ class TestMetadataArrays:
         epss_arr = metadata_array._metadata_raw["epss"]
         assert epss_arr.dtype == np.float32
 
-    def test_is_kev_dtype(self, metadata_array):
-        """is_kev stored as bool."""
-        kev_arr = metadata_array._metadata_raw["is_kev"]
+    def test_kev_dtype(self, metadata_array):
+        """kev stored as bool."""
+        kev_arr = metadata_array._metadata_raw["kev"]
         assert kev_arr.dtype == np.bool_
 
     def test_cve_id_dtype(self, metadata_array):
@@ -1198,7 +1198,7 @@ def test_enrichment_properties():
 
     v = CVDVulnerability("CVE-2024-001")
     v.enrichment.epss = 0.85
-    v.enrichment.is_kev = True
+    v.enrichment.kev = True
 
     arr = CVDArray([v])
 
