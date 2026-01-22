@@ -3,13 +3,13 @@ Data Models - Dataclasses and property descriptors
 
 Provides:
 - VulnerabilityIdentity: ID fields (vuln_id, cve_id)
-- VulnerabilityScoringData: CVSS scoring fields
-- VulnerabilityEnrichmentData: EPSS, KEV enrichment
-- VulnerabilityEventData: State and event tracking
+- VulnerabilityScoring: CVSS scoring fields
+- VulnerabilityEnrichment: EPSS, KEV enrichment
+- VulnerabilityState: State and event tracking
 - AnalysisResult: Analytics output from CVDAnalyzer
-- ArrayCoreData: Core array fields
-- ArrayTimestamps: Event timestamp arrays (DEPRECATED - use ArrayCVDState)
-- ArrayCVDState: CVD state machine data (source of truth)
+- ArrayState: CVD state bitmask array
+- ArrayTimestamps: Event timestamp arrays (V, F, D, P, X, A)
+- ArrayIdentifiers: Vulnerability ID arrays (vuln_id, cve_id)
 - ArrayCVDAnalytics: Precomputed bitmasks for vectorized queries
 - ArrayMetadata: Metadata storage
 - compute_pair_mask(): Vectorized pair ordering computation
@@ -86,7 +86,7 @@ class VulnerabilityIdentity:
 
 
 @dataclass
-class VulnerabilityScoringData:
+class VulnerabilityScoring:
     """CVSS scoring data (supports 2.0, 3.0, 3.1, 4.0)."""
 
     # CVSS version (2.0, 3.0, 3.1, 4.0) - default 3.1
@@ -119,7 +119,7 @@ class VulnerabilityScoringData:
 
 
 @dataclass
-class VulnerabilityEnrichmentData:
+class VulnerabilityEnrichment:
     """External enrichment data from EPSS, KEV, NVD, etc."""
 
     epss: Optional[float] = None  # Exploit Prediction Scoring System (0.0-1.0)
@@ -129,8 +129,14 @@ class VulnerabilityEnrichmentData:
 
 
 @dataclass
-class VulnerabilityEventData:
-    """Event tracking and state information."""
+class VulnerabilityState:
+    """CVD state for single vulnerability.
+
+    Attributes:
+        state_encoded: 6-bit bitmask encoding which events have occurred (VFDPXA).
+        events: Dict mapping CVDEvent to timestamp (or None for unknown timestamp).
+        history: List of state transition records.
+    """
 
     state_encoded: np.uint8 = field(default_factory=lambda: np.uint8(0))
     events: dict[CVDEvent, Optional[datetime]] = field(default_factory=dict)
@@ -141,12 +147,18 @@ class VulnerabilityEventData:
 
 
 @dataclass
-class ArrayCoreData:
-    """Core data arrays for CVDArray (vulnerabilities, states, identifiers)."""
+class ArrayState:
+    """CVD state bitmask array. Bit positions: V=0, F=1, D=2, P=3, X=4, A=5."""
 
-    vulnerabilities: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
-    states: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.uint8))
-    vuln_ids: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
+    bitmask: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.uint8))
+
+    def __getitem__(self, key: Any) -> "ArrayState":
+        """Slice array consistently."""
+        return ArrayState(bitmask=self.bitmask[key])
+
+    def __len__(self) -> int:
+        """Number of vulnerabilities."""
+        return len(self.bitmask)
 
 
 @dataclass
@@ -254,48 +266,12 @@ class ArrayEnrichment:
 
 
 @dataclass
-class ArrayCVDState:
-    """
-    CVD state machine data - SINGLE SOURCE OF TRUTH.
-
-    All CVD state information (history, event_order, pairs) can be derived
-    from these two components: which events occurred + when they occurred.
-
-    This is the minimal storage required to reconstruct all CVD analytics.
-    See docs/design/2026-01-20-cvd-state-storage-architecture.md for details.
-    """
-
-    # Which events occurred (bitmask: bit 0=V, 1=F, 2=D, 3=P, 4=X, 5=A)
-    states: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.uint8))
-
-    # When each event occurred (NaT if event not occurred)
-    V_timestamps: np.ndarray = field(default_factory=lambda: np.array([], dtype="datetime64[us]"))
-    F_timestamps: np.ndarray = field(default_factory=lambda: np.array([], dtype="datetime64[us]"))
-    D_timestamps: np.ndarray = field(default_factory=lambda: np.array([], dtype="datetime64[us]"))
-    P_timestamps: np.ndarray = field(default_factory=lambda: np.array([], dtype="datetime64[us]"))
-    X_timestamps: np.ndarray = field(default_factory=lambda: np.array([], dtype="datetime64[us]"))
-    A_timestamps: np.ndarray = field(default_factory=lambda: np.array([], dtype="datetime64[us]"))
-
-    def __getitem__(self, key: Any) -> "ArrayCVDState":
-        """Slice all arrays consistently."""
-        return ArrayCVDState(
-            states=self.states[key],
-            V_timestamps=self.V_timestamps[key],
-            F_timestamps=self.F_timestamps[key],
-            D_timestamps=self.D_timestamps[key],
-            P_timestamps=self.P_timestamps[key],
-            X_timestamps=self.X_timestamps[key],
-            A_timestamps=self.A_timestamps[key],
-        )
-
-
-@dataclass
 class ArrayCVDAnalytics:
     """
     Precomputed bitmasks for fast vectorized queries.
 
     Computed once during array construction or sync(), reused for all queries.
-    These are DERIVED from ArrayCVDState - not independent source data.
+    Derived from ArrayState + ArrayTimestamps - not independent source data.
 
     Memory cost: 3 bytes/vuln (2 for pair_mask + 1 for history_id)
     Performance gain: O(1) vectorized queries vs O(n log n) timestamp sorting
@@ -620,27 +596,19 @@ class ArrayAnalytics:
     )
     fix_lag_days: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
     deployment_lag_days: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
-    desiderata_scores: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
+    desiderata_score: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
 
     # Bitmask fields (uint16 for 12 bits)
     desiderata_mask: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.uint16))
     anti_desiderata_mask: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.uint16))
 
-    skill_scores: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
+    skill_score: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
 
     # Integer count
     violated_orderings_count: np.ndarray = field(
         default_factory=lambda: np.array([], dtype=np.int32)
     )
 
-    # Deprecated alias for backward compatibility
-    @property
-    def cubes(self) -> np.ndarray:
-        """Deprecated: Use fix_path instead."""
-        import warnings
-
-        warnings.warn("cubes is deprecated, use fix_path", DeprecationWarning, stacklevel=2)
-        return self.fix_path
 
 
 @dataclass
@@ -656,7 +624,7 @@ class ArrayMetadata:
 # ==================== HELPER FUNCTIONS ====================
 
 
-def compute_pair_mask(cvd_state: ArrayCVDState) -> np.ndarray:
+def compute_pair_mask(state: ArrayState, timestamps: ArrayTimestamps) -> np.ndarray:
     """
     Compute pair ordering mask from timestamps (vectorized).
 
@@ -664,18 +632,20 @@ def compute_pair_mask(cvd_state: ArrayCVDState) -> np.ndarray:
     Returns uint16 bitmask where bit i indicates if pair i is satisfied.
 
     Args:
-        cvd_state: ArrayCVDState with state_encoded and timestamps
+        state: ArrayState with bitmask array
+        timestamps: ArrayTimestamps with V, F, D, P, X, A timestamp arrays
 
     Returns:
         np.ndarray[uint16]: Bitmask array, one per vulnerability
             Bit 0 = V≺F, Bit 1 = V≺D, ..., Bit 14 = X≺A
 
     Example:
-        >>> state = ArrayCVDState(...)
-        >>> mask = compute_pair_mask(state)
+        >>> state = ArrayState(bitmask=np.array([0b111111], dtype=np.uint8))
+        >>> ts = ArrayTimestamps(...)
+        >>> mask = compute_pair_mask(state, ts)
         >>> is_coordinated = (mask & (1 << 2)) != 0  # V≺P bit
     """
-    n = len(cvd_state.states)
+    n = len(state)
     mask = np.zeros(n, dtype=np.uint16)
 
     # Define all 15 event pairs with their bit positions
@@ -687,30 +657,30 @@ def compute_pair_mask(cvd_state: ArrayCVDState) -> np.ndarray:
     #   4: V≺A
     pairs = [
         # V precedes all others (bits 0-4)
-        ("V_timestamps", "F_timestamps", 0),  # V≺F
-        ("V_timestamps", "D_timestamps", 1),  # V≺D
-        ("V_timestamps", "P_timestamps", 2),  # V≺P
-        ("V_timestamps", "X_timestamps", 3),  # V≺X
-        ("V_timestamps", "A_timestamps", 4),  # V≺A
+        ("V", "F", 0),  # V≺F
+        ("V", "D", 1),  # V≺D
+        ("V", "P", 2),  # V≺P
+        ("V", "X", 3),  # V≺X
+        ("V", "A", 4),  # V≺A
         # F precedes D, P, X, A (bits 5-8)
-        ("F_timestamps", "D_timestamps", 5),  # F≺D
-        ("F_timestamps", "P_timestamps", 6),  # F≺P
-        ("F_timestamps", "X_timestamps", 7),  # F≺X
-        ("F_timestamps", "A_timestamps", 8),  # F≺A
+        ("F", "D", 5),  # F≺D
+        ("F", "P", 6),  # F≺P
+        ("F", "X", 7),  # F≺X
+        ("F", "A", 8),  # F≺A
         # D precedes P, X, A (bits 9-11)
-        ("D_timestamps", "P_timestamps", 9),  # D≺P
-        ("D_timestamps", "X_timestamps", 10),  # D≺X
-        ("D_timestamps", "A_timestamps", 11),  # D≺A
+        ("D", "P", 9),  # D≺P
+        ("D", "X", 10),  # D≺X
+        ("D", "A", 11),  # D≺A
         # P precedes X, A (bits 12-13)
-        ("P_timestamps", "X_timestamps", 12),  # P≺X
-        ("P_timestamps", "A_timestamps", 13),  # P≺A
+        ("P", "X", 12),  # P≺X
+        ("P", "A", 13),  # P≺A
         # X precedes A (bit 14)
-        ("X_timestamps", "A_timestamps", 14),  # X≺A
+        ("X", "A", 14),  # X≺A
     ]
 
     for earlier_attr, later_attr, bit_pos in pairs:
-        earlier_ts = getattr(cvd_state, earlier_attr)
-        later_ts = getattr(cvd_state, later_attr)
+        earlier_ts = getattr(timestamps, earlier_attr)
+        later_ts = getattr(timestamps, later_attr)
 
         # Both events must have occurred
         both_occurred = ~np.isnat(earlier_ts) & ~np.isnat(later_ts)
@@ -725,7 +695,7 @@ def compute_pair_mask(cvd_state: ArrayCVDState) -> np.ndarray:
     return mask
 
 
-def compute_history_id(cvd_state: ArrayCVDState) -> np.ndarray:
+def compute_history_id(state: ArrayState, timestamps: ArrayTimestamps) -> np.ndarray:
     """
     Compute history IDs from timestamps (0-69 for complete, 255 for incomplete).
 
@@ -736,7 +706,8 @@ def compute_history_id(cvd_state: ArrayCVDState) -> np.ndarray:
     For incomplete histories (fewer than 6 events), returns 255.
 
     Args:
-        cvd_state: ArrayCVDState with timestamps for all 6 events
+        state: ArrayState with bitmask array
+        timestamps: ArrayTimestamps with V, F, D, P, X, A timestamp arrays
 
     Returns:
         np.ndarray[uint8]: History ID array
@@ -744,24 +715,25 @@ def compute_history_id(cvd_state: ArrayCVDState) -> np.ndarray:
             - 255: Incomplete history (not all 6 events occurred)
 
     Example:
-        >>> state = ArrayCVDState(...)  # with timestamps for V, F, D, P, X, A
-        >>> ids = compute_history_id(state)
+        >>> state = ArrayState(bitmask=np.array([0b111111], dtype=np.uint8))
+        >>> ts = ArrayTimestamps(...)  # with timestamps for V, F, D, P, X, A
+        >>> ids = compute_history_id(state, ts)
         >>> ids[0]  # 69 for VFDPXA (perfect CVD)
     """
     from .constants import HISTORY_TO_ID, INCOMPLETE_HISTORY_ID
 
-    n = len(cvd_state.states)
+    n = len(state)
     result = np.full(n, INCOMPLETE_HISTORY_ID, dtype=np.uint8)
 
     # Stack all timestamps: shape (N, 6)
-    timestamps = np.column_stack(
+    ts_stack = np.column_stack(
         [
-            cvd_state.V_timestamps,
-            cvd_state.F_timestamps,
-            cvd_state.D_timestamps,
-            cvd_state.P_timestamps,
-            cvd_state.X_timestamps,
-            cvd_state.A_timestamps,
+            timestamps.V,
+            timestamps.F,
+            timestamps.D,
+            timestamps.P,
+            timestamps.X,
+            timestamps.A,
         ]
     )
 
@@ -769,12 +741,12 @@ def compute_history_id(cvd_state: ArrayCVDState) -> np.ndarray:
     event_labels = ["V", "F", "D", "P", "X", "A"]
 
     # Check which rows have all 6 events (no NaT values)
-    complete_mask = ~np.any(np.isnat(timestamps), axis=1)
+    complete_mask = ~np.any(np.isnat(ts_stack), axis=1)
 
     # Process only complete histories
     for i in np.where(complete_mask)[0]:
         # Get timestamps for this vulnerability
-        ts = timestamps[i]
+        ts = ts_stack[i]
 
         # Sort indices by timestamp to get chronological order
         order = np.argsort(ts)
@@ -788,3 +760,5 @@ def compute_history_id(cvd_state: ArrayCVDState) -> np.ndarray:
         # else: remains 255 (invalid history - should not happen with valid data)
 
     return result
+
+
