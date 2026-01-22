@@ -10,9 +10,24 @@ Used by: io.py
 """
 
 import contextlib
-import json
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional, Union
+
+# Use orjson for faster JSON parsing if available
+try:
+    import orjson
+
+    def _load_json(filepath: str) -> Any:
+        with open(filepath, "rb") as f:
+            return orjson.loads(f.read())
+
+except ImportError:
+    import json
+
+    def _load_json(filepath: str) -> Any:
+        with open(filepath, encoding="utf-8") as f:
+            return json.load(f)
+
 
 if TYPE_CHECKING:
     from .array import CVDArray
@@ -424,15 +439,10 @@ class NVDParser:
         vuln.scoring.cvss_exploitability_score = exploitability
         vuln.scoring.cvss_impact_score = impact
 
-        # Extract ALL CPEs and derive vendor/product lists
+        # Extract ALL CPEs (vendors/products parsed lazily during export)
         cpe_strings = NVDParser.extract_all_cpes(item, format_version)
         if cpe_strings:
             vuln.metadata["cpe_strings"] = cpe_strings
-            vendors, products = NVDParser.extract_vendors_products(cpe_strings)
-            if vendors:
-                vuln.metadata["vendors"] = vendors
-            if products:
-                vuln.metadata["products"] = products
 
         # Extract description
         description = NVDParser.extract_description(item, format_version)
@@ -497,8 +507,7 @@ class NVDParser:
         if isinstance(source, str):
             # Resolve URL or local path
             local_path = CVDIO._resolve_source(source)
-            with open(local_path, encoding="utf-8") as f:
-                nvd_feed = json.load(f)
+            nvd_feed = _load_json(local_path)
 
             # Detect format version
             format_version = NVDParser.detect_format(nvd_feed)

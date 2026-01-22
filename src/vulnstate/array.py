@@ -41,12 +41,12 @@ from .constants import (
 )
 from .models import (
     ArrayAnalytics,
-    ArrayCoreData,
     ArrayCVDAnalytics,
-    ArrayCVDState,
     ArrayEnrichment,
+    ArrayIdentifiers,
     ArrayMetadata,
     ArrayScoring,
+    ArrayState,
     ArrayTimestamps,
     compute_history_id,
     compute_pair_mask,
@@ -96,14 +96,20 @@ class CVDArray:
             >>> arr = CVDArray.zeros(100)  # Pre-allocated 100 slots
             >>> arr.import_nvd('data.json')  # ValueError if >100 items
         """
+        # Live vulnerability objects (can be expunged after analysis)
+        self._vulnerabilities: np.ndarray = np.array([], dtype=object)
+
         # Data components (dataclasses)
-        self.core = ArrayCoreData()
-        self.timestamps = ArrayTimestamps()
-        self.analytics = ArrayAnalytics()
-        self._metadata_data = ArrayMetadata()
+        self.identifiers = ArrayIdentifiers()  # vuln_id + cve_id
+        self.timestamps = ArrayTimestamps()  # Event timestamps (V, F, D, P, X, A)
         self.scoring = ArrayScoring()
         self.enrichment = ArrayEnrichment()
-        self.bitmasks = ArrayCVDAnalytics()  # Precomputed pair_mask for vectorized queries
+        self.analytics = ArrayAnalytics()  # Computed metrics cache
+        self.cvd_analytics = ArrayCVDAnalytics()  # Precomputed pair_mask, history_id
+        self._metadata_data = ArrayMetadata()  # Legacy metadata storage
+
+        # State dataclass (uint8 bitmask array)
+        self.state = ArrayState()
 
         # Metadata encoders (for categorical optimization - not yet implemented)
         self._metadata_encoders: dict[str, Any] = {}
@@ -118,6 +124,9 @@ class CVDArray:
         self._pair_mask_dirty = True
         self._history_id_dirty = True
 
+        # Lazy CVSS metric parsing flag (like _analysis_cache pattern)
+        self._cvss_metrics_parsed = False
+
         # Fixed-size semantics
         self._fixed_size = fixed_size
 
@@ -128,7 +137,7 @@ class CVDArray:
 
     def _init_empty(self) -> None:
         """Initialize empty arrays (dataclasses already initialized with empty arrays)."""
-        # Dataclasses (self.core, self.timestamps, self.analytics, self.metadata)
+        # Dataclasses (cvd_state, identifiers, cvd_analytics, scoring, enrichment, analytics)
         # are already initialized with empty arrays in __init__
         pass
 
@@ -139,20 +148,29 @@ class CVDArray:
 
         n = len(vulnerabilities)
 
-        # Core data
-        self.core.vulnerabilities = np.array(vulnerabilities, dtype=object)
-        self.core.states = np.array(
-            [v.event_data.state_encoded for v in vulnerabilities], dtype=np.uint8
-        )
-        self.core.vuln_ids = np.array([v.identity.vuln_id for v in vulnerabilities], dtype=object)
+        # Live vulnerability objects
+        self._vulnerabilities = np.array(vulnerabilities, dtype=object)
 
-        # Initialize timestamp arrays (will be filled by sync)
+        # State array
+        self.state.bitmask = np.array(
+            [v.state.state_encoded for v in vulnerabilities], dtype=np.uint8
+        )
+
+        # Timestamps
         self.timestamps.V = np.full(n, np.datetime64("NaT"), dtype="datetime64[us]")
         self.timestamps.F = np.full(n, np.datetime64("NaT"), dtype="datetime64[us]")
         self.timestamps.D = np.full(n, np.datetime64("NaT"), dtype="datetime64[us]")
         self.timestamps.P = np.full(n, np.datetime64("NaT"), dtype="datetime64[us]")
         self.timestamps.X = np.full(n, np.datetime64("NaT"), dtype="datetime64[us]")
         self.timestamps.A = np.full(n, np.datetime64("NaT"), dtype="datetime64[us]")
+
+        # Identifiers
+        self.identifiers.vuln_id = np.array(
+            [v.identity.vuln_id for v in vulnerabilities], dtype=object
+        )
+        self.identifiers.cve_id = np.array(
+            [v.identity.cve_id for v in vulnerabilities], dtype=object
+        )
 
         # Initialize analytics arrays (will be filled by sync)
         self.analytics.severities = np.empty(n, dtype=object)
@@ -168,8 +186,8 @@ class CVDArray:
         self.analytics.fix_lag_days = np.full(n, np.nan, dtype=np.float32)
         self.analytics.deployment_lag_days = np.full(n, np.nan, dtype=np.float32)
         self.analytics.violated_orderings_count = np.zeros(n, dtype=np.int32)
-        self.analytics.desiderata_scores = np.zeros(n, dtype=np.float32)
-        self.analytics.skill_scores = np.full(n, np.nan, dtype=np.float32)
+        self.analytics.desiderata_score = np.zeros(n, dtype=np.float32)
+        self.analytics.skill_score = np.full(n, np.nan, dtype=np.float32)
 
         # Trigger initial sync to populate arrays
         self._dirty_indices = set(range(n))
@@ -182,7 +200,7 @@ class CVDArray:
             for event in CVDEvent:
                 timestamps = []
                 for v in vulnerabilities:
-                    ts = v.event_data.events.get(event)
+                    ts = v.state.events.get(event)
                     if ts:
                         timestamps.append(np.datetime64(ts, "us"))
                     else:
@@ -202,9 +220,7 @@ class CVDArray:
         ]
         self._metadata_data.raw["cvss_score"] = np.array(cvss_scores, dtype=np.float32)
 
-        # Extract scoring data
-        from .parsers import NVDParser
-
+        # Extract scoring data (CVSS score only - metrics parsed lazily)
         self.scoring.cvss_score = np.array(
             [
                 v.scoring.cvss_base_score if v.scoring.cvss_base_score is not None else np.nan
@@ -213,16 +229,23 @@ class CVDArray:
             dtype=np.float32,
         )
 
-        # Parse CVSS vectors and extract metrics
-        cvss_metrics = [NVDParser.parse_cvss_vector(v.scoring.cve_vector) for v in vulnerabilities]
-        self.scoring.attack_vector = np.array([m["AV"] for m in cvss_metrics], dtype=object)
-        self.scoring.attack_complexity = np.array([m["AC"] for m in cvss_metrics], dtype=object)
-        self.scoring.privileges_required = np.array([m["PR"] for m in cvss_metrics], dtype=object)
-        self.scoring.user_interaction = np.array([m["UI"] for m in cvss_metrics], dtype=object)
-        self.scoring.scope = np.array([m["S"] for m in cvss_metrics], dtype=object)
-        self.scoring.confidentiality_impact = np.array([m["C"] for m in cvss_metrics], dtype=object)
-        self.scoring.integrity_impact = np.array([m["I"] for m in cvss_metrics], dtype=object)
-        self.scoring.availability_impact = np.array([m["A"] for m in cvss_metrics], dtype=object)
+        # Store raw CVSS vectors for lazy parsing (avoid parsing during import)
+        self.scoring.cve_vector = np.array(
+            [v.scoring.cve_vector for v in vulnerabilities], dtype=object
+        )
+
+        # Initialize CVSS metric arrays as empty (populated on first access)
+        self.scoring.attack_vector = np.empty(n, dtype=object)
+        self.scoring.attack_complexity = np.empty(n, dtype=object)
+        self.scoring.privileges_required = np.empty(n, dtype=object)
+        self.scoring.user_interaction = np.empty(n, dtype=object)
+        self.scoring.scope = np.empty(n, dtype=object)
+        self.scoring.confidentiality_impact = np.empty(n, dtype=object)
+        self.scoring.integrity_impact = np.empty(n, dtype=object)
+        self.scoring.availability_impact = np.empty(n, dtype=object)
+
+        # Reset lazy parsing flag (metrics not yet parsed)
+        self._cvss_metrics_parsed = False
 
         # Extract enrichment data
         self.enrichment.epss = np.array(
@@ -327,22 +350,22 @@ class CVDArray:
     @property
     def state_ints(self) -> np.ndarray:
         """Get states array as integers."""
-        return self.core.states
+        return self.state.bitmask
 
     @state_ints.setter
     def state_ints(self, value: np.ndarray) -> None:
         """Set states array as integers."""
-        self.core.states = value
+        self.state.bitmask = value
 
     @property
     def vuln_ids(self) -> np.ndarray:
         """Get vulnerability IDs array."""
-        return self.core.vuln_ids
+        return self.identifiers.vuln_id
 
     @vuln_ids.setter
     def vuln_ids(self, value: np.ndarray) -> None:
         """Set vulnerability IDs array."""
-        self.core.vuln_ids = value
+        self.identifiers.vuln_id = value
 
     @property
     def cve_ids(self) -> np.ndarray:
@@ -363,17 +386,7 @@ class CVDArray:
             >>> mask = arr.cve_ids == 'CVE-2024-001'
             >>> critical = arr[mask]
         """
-        return self._metadata_raw.get("_cve_id", np.array([], dtype=object))
-
-    @property
-    def _vulnerabilities(self) -> np.ndarray:
-        """Get live vulnerability objects array."""
-        return self.core.vulnerabilities
-
-    @_vulnerabilities.setter
-    def _vulnerabilities(self, value: np.ndarray) -> None:
-        """Set live vulnerability objects array."""
-        self.core.vulnerabilities = value
+        return self.identifiers.cve_id
 
     @property
     def V_timestamps(self) -> np.ndarray:
@@ -451,23 +464,12 @@ class CVDArray:
         See:
             docs/design/2026-01-20-cvd-state-storage-architecture.md
         """
-        if self._pair_mask_dirty or len(self.bitmasks.pair_mask) != len(self):
-            # Create ArrayCVDState from existing data (source of truth)
-            cvd_state = ArrayCVDState(
-                states=self.state_ints,
-                V_timestamps=self.V_timestamps,
-                F_timestamps=self.F_timestamps,
-                D_timestamps=self.D_timestamps,
-                P_timestamps=self.P_timestamps,
-                X_timestamps=self.X_timestamps,
-                A_timestamps=self.A_timestamps,
-            )
-
-            # Compute pair_mask from source data
-            self.bitmasks.pair_mask = compute_pair_mask(cvd_state)
+        if self._pair_mask_dirty or len(self.cvd_analytics.pair_mask) != len(self):
+            # Compute pair_mask from state + timestamps
+            self.cvd_analytics.pair_mask = compute_pair_mask(self.state, self.timestamps)
             self._pair_mask_dirty = False
 
-        return self.bitmasks.pair_mask
+        return self.cvd_analytics.pair_mask
 
     @property
     def history_id(self) -> np.ndarray:
@@ -499,23 +501,12 @@ class CVDArray:
             - vulnstate.constants.VALID_HISTORIES for full list
             - docs/ref/cvd-histories.md for interpretation
         """
-        if self._history_id_dirty or len(self.bitmasks.history_id) != len(self):
-            # Create ArrayCVDState from existing data (source of truth)
-            cvd_state = ArrayCVDState(
-                states=self.state_ints,
-                V_timestamps=self.V_timestamps,
-                F_timestamps=self.F_timestamps,
-                D_timestamps=self.D_timestamps,
-                P_timestamps=self.P_timestamps,
-                X_timestamps=self.X_timestamps,
-                A_timestamps=self.A_timestamps,
-            )
-
-            # Compute history_id from source data
-            self.bitmasks.history_id = compute_history_id(cvd_state)
+        if self._history_id_dirty or len(self.cvd_analytics.history_id) != len(self):
+            # Compute history_id from state + timestamps
+            self.cvd_analytics.history_id = compute_history_id(self.state, self.timestamps)
             self._history_id_dirty = False
 
-        return self.bitmasks.history_id
+        return self.cvd_analytics.history_id
 
     @property
     def severities(self) -> np.ndarray:
@@ -909,8 +900,8 @@ class CVDArray:
         return count
 
     @property
-    def desiderata_scores(self) -> np.ndarray:
-        """Get desiderata_scores analytics array (0.0 to 1.0).
+    def desiderata_score(self) -> np.ndarray:
+        """Get desiderata score analytics array (0.0 to 1.0).
 
         Reads from AnalysisResult.desiderata_score computed by CVDAnalyzer.
         Fraction of satisfied desiderata (desiderata_count / 12).
@@ -993,8 +984,8 @@ class CVDArray:
         return (self.anti_desiderata_mask & required) == required
 
     @property
-    def skill_scores(self) -> np.ndarray:
-        """Get skill_scores analytics array.
+    def skill_score(self) -> np.ndarray:
+        """Get skill score analytics array.
 
         Reads from AnalysisResult.skill_score computed by CVDAnalyzer.
         """
@@ -1171,6 +1162,9 @@ class CVDArray:
         """
         if idx < -len(self) or idx >= len(self):
             raise IndexError(f"Index {idx} out of range for array of size {len(self)}")
+        # Mark as dirty since get() is for mutation
+        actual_idx = idx if idx >= 0 else len(self) + idx
+        self._dirty_indices.add(actual_idx)
         return self._vulnerabilities[idx]
 
     # ==================== VECTORIZED STATE QUERIES ====================
@@ -1325,7 +1319,8 @@ class CVDArray:
         """
         Update cached arrays from dirty objects.
 
-        Syncs state and timestamps from live vulnerability objects to cached arrays.
+        Syncs state, timestamps, and enrichment data from live vulnerability
+        objects to cached arrays.
 
         Args:
             indices: Optional specific indices to sync (uses _dirty_indices if None)
@@ -1338,11 +1333,12 @@ class CVDArray:
 
         # Sync each dirty index
         for idx in to_sync:
-            vuln = self.core.vulnerabilities[idx]
+            vuln = self._vulnerabilities[idx]
 
-            # Update state and vuln_id
-            self.core.states[idx] = vuln.event_data.state_encoded
-            self.core.vuln_ids[idx] = vuln.identity.vuln_id
+            # Update state and identifiers
+            self.state.bitmask[idx] = vuln.state.state_encoded
+            self.identifiers.vuln_id[idx] = vuln.identity.vuln_id
+            self.identifiers.cve_id[idx] = vuln.identity.cve_id
 
             # Extract timestamps to exploded arrays
             with warnings.catch_warnings():
@@ -1355,11 +1351,21 @@ class CVDArray:
                     (CVDEvent.X, "X"),
                     (CVDEvent.A, "A"),
                 ]:
-                    ts = vuln.event_data.events.get(event)
+                    ts = vuln.state.events.get(event)
                     if ts:
                         getattr(self.timestamps, attr_name)[idx] = np.datetime64(ts, "us")
                     else:
                         getattr(self.timestamps, attr_name)[idx] = np.datetime64("NaT")
+
+            # Sync enrichment data (EPSS, KEV) - only if arrays are initialized
+            if len(self.enrichment.epss) > idx:
+                if vuln.enrichment.epss is not None:
+                    self.enrichment.epss[idx] = vuln.enrichment.epss
+                if vuln.enrichment.epss_percentile is not None:
+                    self.enrichment.epss_percentile[idx] = vuln.enrichment.epss_percentile
+                self.enrichment.kev[idx] = vuln.enrichment.kev
+                if vuln.enrichment.kev_date is not None:
+                    self.enrichment.kev_date[idx] = np.datetime64(vuln.enrichment.kev_date, "s")
 
         # Clear dirty flags
         self._dirty_indices -= to_sync
@@ -2104,6 +2110,44 @@ class CVDArray:
 
     # ==================== SCORING PROPERTIES ====================
 
+    def _ensure_cvss_metrics_parsed(self) -> None:
+        """Lazy parse all CVSS vectors on first metric access (batch).
+
+        Parses all vectors at once to populate all 8 CVSS metric arrays.
+        This avoids parsing during import, deferring the cost to first access.
+        """
+        if self._cvss_metrics_parsed:
+            return
+
+        from .parsers import NVDParser
+
+        # Get raw vectors from scoring dataclass
+        vectors: np.ndarray = (
+            self.scoring.cve_vector
+            if hasattr(self.scoring, "cve_vector")
+            else np.array([], dtype=object)
+        )
+
+        if len(vectors) == 0:
+            # Empty array, nothing to parse
+            self._cvss_metrics_parsed = True
+            return
+
+        # Parse all vectors at once
+        metrics = [NVDParser.parse_cvss_vector(v) for v in vectors]
+
+        # Populate ALL scoring arrays
+        self.scoring.attack_vector = np.array([m["AV"] for m in metrics], dtype=object)
+        self.scoring.attack_complexity = np.array([m["AC"] for m in metrics], dtype=object)
+        self.scoring.privileges_required = np.array([m["PR"] for m in metrics], dtype=object)
+        self.scoring.user_interaction = np.array([m["UI"] for m in metrics], dtype=object)
+        self.scoring.scope = np.array([m["S"] for m in metrics], dtype=object)
+        self.scoring.confidentiality_impact = np.array([m["C"] for m in metrics], dtype=object)
+        self.scoring.integrity_impact = np.array([m["I"] for m in metrics], dtype=object)
+        self.scoring.availability_impact = np.array([m["A"] for m in metrics], dtype=object)
+
+        self._cvss_metrics_parsed = True
+
     @property
     def cvss_scores(self) -> np.ndarray:
         """CVSS base scores array."""
@@ -2117,41 +2161,49 @@ class CVDArray:
     @property
     def attack_vector(self) -> np.ndarray:
         """Attack Vector: N (Network), A (Adjacent), L (Local), P (Physical)."""
+        self._ensure_cvss_metrics_parsed()
         return self.scoring.attack_vector
 
     @property
     def attack_complexity(self) -> np.ndarray:
         """Attack Complexity: L (Low), H (High)."""
+        self._ensure_cvss_metrics_parsed()
         return self.scoring.attack_complexity
 
     @property
     def privileges_required(self) -> np.ndarray:
         """Privileges Required: N (None), L (Low), H (High)."""
+        self._ensure_cvss_metrics_parsed()
         return self.scoring.privileges_required
 
     @property
     def user_interaction(self) -> np.ndarray:
         """User Interaction: N (None), R (Required)."""
+        self._ensure_cvss_metrics_parsed()
         return self.scoring.user_interaction
 
     @property
     def scope(self) -> np.ndarray:
         """Scope: U (Unchanged), C (Changed)."""
+        self._ensure_cvss_metrics_parsed()
         return self.scoring.scope
 
     @property
     def confidentiality_impact(self) -> np.ndarray:
         """Confidentiality Impact: N (None), L (Low), H (High)."""
+        self._ensure_cvss_metrics_parsed()
         return self.scoring.confidentiality_impact
 
     @property
     def integrity_impact(self) -> np.ndarray:
         """Integrity Impact: N (None), L (Low), H (High)."""
+        self._ensure_cvss_metrics_parsed()
         return self.scoring.integrity_impact
 
     @property
     def availability_impact(self) -> np.ndarray:
         """Availability Impact: N (None), L (Low), H (High)."""
+        self._ensure_cvss_metrics_parsed()
         return self.scoring.availability_impact
 
     # ==================== ENRICHMENT PROPERTIES ====================

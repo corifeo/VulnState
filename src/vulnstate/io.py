@@ -129,6 +129,7 @@ class CVDIO:
             arr._metadata_raw["kev"] = np.full(len(arr), False, dtype=bool)
 
         # Process each vulnerability
+        modified_indices: set[int] = set()
         if arr._vulnerabilities is not None and len(arr._vulnerabilities) > 0:
             for i in range(len(arr)):
                 cve_id = str(cve_ids[i])
@@ -169,6 +170,13 @@ class CVDIO:
                     with contextlib.suppress(ValueError):
                         # Event constraints violated, skip if raised
                         vuln.apply_event(CVDEvent.A, date_added)
+
+                modified_indices.add(i)
+
+            # Sync modified indices to update array-level enrichment arrays
+            if modified_indices:
+                arr._dirty_indices.update(modified_indices)
+                arr.sync()
         else:
             # TODO: Handle expunged _vulnerabilities
             pass
@@ -220,6 +228,7 @@ class CVDIO:
         cve_ids = arr._metadata_raw["_cve_id"]
 
         # Process each vulnerability
+        modified_indices: set[int] = set()
         if arr._vulnerabilities is not None and len(arr._vulnerabilities) > 0:
             for i in range(len(arr)):
                 cve_id = str(cve_ids[i])
@@ -268,6 +277,13 @@ class CVDIO:
                     # Also extract percentile if it's a dict
                     if isinstance(epss_value, dict) and "percentile" in epss_value:
                         vuln.enrichment.epss_percentile = float(epss_value["percentile"])
+
+                modified_indices.add(i)
+
+            # Sync modified indices to update array-level enrichment arrays
+            if modified_indices:
+                arr._dirty_indices.update(modified_indices)
+                arr.sync()
         else:
             # TODO: Handle expunged _vulnerabilities
             pass
@@ -514,90 +530,84 @@ class CVDIO:
         """
         import pandas as pd
 
-        # Start with base data from dict conversion
-        dicts = CVDIO.array_to_dicts(arr, include_computed=False)
-        df = pd.DataFrame(dicts)
+        # Build DataFrame directly from arrays (vectorized, fast)
+        data: dict[str, Any] = {
+            "cve_id": arr.cve_ids,
+            "vuln_id": arr.vuln_ids,
+            "state": arr.states,
+            "cvss_score": arr.cvss_scores,
+            "epss": arr.epss,
+            "kev": arr.kev,
+            "state_label": arr.state_labels,
+        }
 
-        # Flatten event_timestamps into separate columns
-        if "event_timestamps" in df.columns:
-            # Extract event timestamps as separate columns
-            event_ts_df = pd.json_normalize(df["event_timestamps"])
-            # Rename columns to add _timestamp suffix
-            event_ts_df.columns = [f"{col}_timestamp" for col in event_ts_df.columns]
-            # Drop the nested event_timestamps column
-            df = df.drop(columns=["event_timestamps"])
-            # Concatenate the flattened event timestamps
-            df = pd.concat([df, event_ts_df], axis=1)
+        # Add CVSS metrics (vectorized)
+        data["attack_vector"] = arr.attack_vector
+        data["attack_complexity"] = arr.attack_complexity
+        data["privileges_required"] = arr.privileges_required
+        data["user_interaction"] = arr.user_interaction
+        data["scope"] = arr.scope
+        data["confidentiality_impact"] = arr.confidentiality_impact
+        data["integrity_impact"] = arr.integrity_impact
+        data["availability_impact"] = arr.availability_impact
 
-        # Drop the nested history column (not useful in DataFrame format)
-        if "history" in df.columns:
-            df = df.drop(columns=["history"])
-
-        # Add state labels (compressed state like 'VFP')
-        for i in range(len(arr)):
-            df.loc[i, "state_label"] = arr.state_labels[i]
-
-        # Add CVSS metrics
-        for i in range(len(arr)):
-            df.loc[i, "attack_vector"] = arr.attack_vector[i]
-            df.loc[i, "attack_complexity"] = arr.attack_complexity[i]
-            df.loc[i, "privileges_required"] = arr.privileges_required[i]
-            df.loc[i, "user_interaction"] = arr.user_interaction[i]
-            df.loc[i, "scope"] = arr.scope[i]
-            df.loc[i, "confidentiality_impact"] = arr.confidentiality_impact[i]
-            df.loc[i, "integrity_impact"] = arr.integrity_impact[i]
-            df.loc[i, "availability_impact"] = arr.availability_impact[i]
-
-        # Add analytics if requested
+        # Add analytics if requested (vectorized)
         if include_analytics:
-            for i in range(len(arr)):
-                df.loc[i, "is_fix_available"] = arr.is_fix_available[i]
-                df.loc[i, "is_fix_deployed"] = arr.is_fix_deployed[i]
-                df.loc[i, "is_weaponized"] = arr.is_weaponized[i]
-                df.loc[i, "is_under_attack"] = arr.is_under_attack[i]
-                df.loc[i, "is_premature_disclosure"] = arr.is_premature_disclosure[i]
-                df.loc[i, "disclosure_window_days"] = arr.disclosure_window_days[i]
-                df.loc[i, "fix_lag_days"] = arr.fix_lag_days[i]
-                df.loc[i, "deployment_lag_days"] = arr.deployment_lag_days[i]
-                # Phase 5 analytical properties
-                df.loc[i, "is_zero_day_exploit"] = arr.is_zero_day_exploit[i]
-                df.loc[i, "is_zero_day_attack"] = arr.is_zero_day_attack[i]
-                df.loc[i, "is_coordinated"] = arr.is_coordinated[i]
-                df.loc[i, "is_responsible_disclosure"] = arr.is_responsible_disclosure[i]
-                df.loc[i, "has_fix_before_exploit"] = arr.has_fix_before_exploit[i]
-                df.loc[i, "has_fix_before_attack"] = arr.has_fix_before_attack[i]
-                df.loc[i, "has_deployment_before_exploit"] = arr.has_deployment_before_exploit[i]
-                df.loc[i, "has_deployment_before_attack"] = arr.has_deployment_before_attack[i]
-                df.loc[i, "is_private_attack"] = arr.is_private_attack[i]
-                df.loc[i, "is_mass_exploitation"] = arr.is_mass_exploitation[i]
+            data["is_fix_available"] = arr.is_fix_available
+            data["is_fix_deployed"] = arr.is_fix_deployed
+            data["is_weaponized"] = arr.is_weaponized
+            data["is_under_attack"] = arr.is_under_attack
+            data["is_premature_disclosure"] = arr.is_premature_disclosure
+            data["disclosure_window_days"] = arr.disclosure_window_days
+            data["fix_lag_days"] = arr.fix_lag_days
+            data["deployment_lag_days"] = arr.deployment_lag_days
+            data["is_zero_day_exploit"] = arr.is_zero_day_exploit
+            data["is_zero_day_attack"] = arr.is_zero_day_attack
+            data["is_coordinated"] = arr.is_coordinated
+            data["is_responsible_disclosure"] = arr.is_responsible_disclosure
+            data["has_fix_before_exploit"] = arr.has_fix_before_exploit
+            data["has_fix_before_attack"] = arr.has_fix_before_attack
+            data["has_deployment_before_exploit"] = arr.has_deployment_before_exploit
+            data["has_deployment_before_attack"] = arr.has_deployment_before_attack
+            data["is_private_attack"] = arr.is_private_attack
+            data["is_mass_exploitation"] = arr.is_mass_exploitation
 
-        # Explode CVSS vectors if requested
-        if explode_cvss:
-            # TODO: Explode CVSS vectors
-            pass
+        # Add event timestamps (vectorized)
+        data["V_timestamp"] = arr.V_timestamps
+        data["F_timestamp"] = arr.F_timestamps
+        data["D_timestamp"] = arr.D_timestamps
+        data["P_timestamp"] = arr.P_timestamps
+        data["X_timestamp"] = arr.X_timestamps
+        data["A_timestamp"] = arr.A_timestamps
+
+        df = pd.DataFrame(data)
 
         # Explode metadata if requested
-        if explode_metadata and "metadata" in df.columns:
-            metadata_rows = []
-            for metadata_dict in df["metadata"]:
-                flat_dict = {}
-                if isinstance(metadata_dict, dict):
-                    for namespace, value in metadata_dict.items():
-                        if isinstance(value, dict):
-                            # Nested metadata: namespace_key pattern
-                            for key, val in value.items():
-                                flat_dict[f"{namespace}_{key}"] = val
-                        else:
-                            # Top-level metadata: just use the key
-                            flat_dict[namespace] = value
-                metadata_rows.append(flat_dict)
+        if explode_metadata:
+            # Get metadata dict and flatten it
+            metadata_raw = arr.metadata
+            for key, values in metadata_raw.items():
+                # Skip internal keys and keys already populated from array properties
+                # (epss, kev come from arr.enrichment, not metadata)
+                if not key.startswith("_") and key not in df.columns:
+                    df[key] = values
 
-            if metadata_rows:
-                metadata_df = pd.DataFrame(metadata_rows)
-                # Drop the nested metadata column
-                df = df.drop(columns=["metadata"])
-                # Concatenate the flattened metadata
-                df = pd.concat([df, metadata_df], axis=1)
+            # Lazy parse vendors/products from cpe_strings if not already present
+            if "cpe_strings" in df.columns and "vendors" not in df.columns:
+                from .parsers import NVDParser
+
+                def _parse_vendors(cpes: Any) -> Any:
+                    if cpes is None or (isinstance(cpes, float) and pd.isna(cpes)):
+                        return None
+                    return NVDParser.extract_vendors_products(cpes)[0] if cpes else None
+
+                def _parse_products(cpes: Any) -> Any:
+                    if cpes is None or (isinstance(cpes, float) and pd.isna(cpes)):
+                        return None
+                    return NVDParser.extract_vendors_products(cpes)[1] if cpes else None
+
+                df["vendors"] = df["cpe_strings"].apply(_parse_vendors)
+                df["products"] = df["cpe_strings"].apply(_parse_products)
 
         return df
 
@@ -660,7 +670,7 @@ class CVDIO:
         data: dict[str, Any] = {
             "cve_id": vuln.cve_id,
             "vuln_id": vuln.vuln_id,
-            "state": vuln.state,
+            "state": vuln.state_str,
             "metadata": dict(vuln.metadata) if vuln.metadata else {},
             "cvss_score": vuln.cvss_score,
             "epss": vuln.epss,
@@ -713,10 +723,10 @@ class CVDIO:
 
         from .constants import CVDEvent, string_to_state_int
         from .models import (
-            VulnerabilityEnrichmentData,
-            VulnerabilityEventData,
+            VulnerabilityEnrichment,
             VulnerabilityIdentity,
-            VulnerabilityScoringData,
+            VulnerabilityScoring,
+            VulnerabilityState,
         )
         from .vulnerability import CVDVulnerability
 
@@ -753,13 +763,11 @@ class CVDIO:
         # Ensure vuln_id is a string (use cve_id as fallback)
         final_vuln_id = vuln_id or data.get("cve_id") or ""
         vuln.identity = VulnerabilityIdentity(vuln_id=str(final_vuln_id), cve_id=data.get("cve_id"))
-        vuln.scoring = VulnerabilityScoringData(
+        vuln.scoring = VulnerabilityScoring(
             cvss_base_score=data.get("cvss_score"), cve_vector=data.get("cve_vector")
         )
-        vuln.enrichment = VulnerabilityEnrichmentData(
-            epss=data.get("epss"), kev=data.get("kev", False)
-        )
-        vuln.event_data = VulnerabilityEventData(
+        vuln.enrichment = VulnerabilityEnrichment(epss=data.get("epss"), kev=data.get("kev", False))
+        vuln.state = VulnerabilityState(
             state_encoded=string_to_state_int(data.get("state", "vfdpxa")),
             events=events,
             history=history,
