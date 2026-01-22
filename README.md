@@ -140,6 +140,16 @@ arr.A_timestamps    # Attack observed
 
 # Dict-style access (matches CVDVulnerability.events pattern)
 arr.events[CVDEvent.V]  # Same as arr.V_timestamps
+
+# Component extraction (0 where event not occurred)
+arr.event_year(CVDEvent.P)      # int16: publication year
+arr.event_month(CVDEvent.F)     # int8: month fix was released (1-12)
+arr.event_age_days(CVDEvent.P)  # float32: days since publication (NaN if not occurred)
+
+# Filter by time components
+published_2024 = arr[arr.event_year(CVDEvent.P) == 2024]
+q1_fixes = arr[arr.event_month(CVDEvent.F) <= 3]
+old_vulns = arr[arr.event_age_days(CVDEvent.P) > 90]
 ```
 
 ### Scoring & Enrichment
@@ -208,10 +218,37 @@ arr.threat_state  # uint8: LATENT / DISCLOSED / WEAPONIZED / ACTIVE_ATTACK
 arr.severities    # CRITICAL / HIGH / MEDIUM / LOW / NONE
 ```
 
+### Prioritization
+
+In most real-world scenarios, vulnerabilities you need to prioritize already have a vendor aware, fix ready, and public disclosure. The question is *which to patch first*. Combine KEV status, EPSS percentile, and vulnerability age into tiers:
+
+```python
+# Tier 1 — Immediate: actively exploited in the wild
+tier1 = arr.kev | arr.is_under_attack
+
+# Tier 2 — Urgent: high exploitation likelihood or weaponized criticals
+tier2 = ~tier1 & (
+    (arr.epss_percentile > 0.95) |
+    (arr.is_weaponized & (arr.cvss_scores >= 9.0))
+)
+
+# Tier 3 — Aging risk: unpatched > 90 days with notable EPSS
+tier3 = ~tier1 & ~tier2 & (
+    (arr.event_age_days(CVDEvent.P) > 90) & (arr.epss_percentile > 0.5)
+)
+
+# Remaining: lower priority
+tier4 = ~tier1 & ~tier2 & ~tier3
+
+# Act on results
+for name, mask in [("IMMEDIATE", tier1), ("URGENT", tier2), ("AGING", tier3)]:
+    print(f"{name}: {mask.sum()} vulnerabilities")
+```
+
 ### Composing Filters
 
 ```python
-# Complex prioritization query
+# Boolean mask algebra — combine any property or enrichment
 high_priority = arr[
     arr.is_zero_day_exploit |
     arr.is_mass_exploitation |

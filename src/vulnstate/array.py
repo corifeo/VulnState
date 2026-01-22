@@ -1228,6 +1228,74 @@ class CVDArray:
         bit_pos = event
         return (self.state_ints & (1 << bit_pos)) != 0
 
+    def event_year(self, event: CVDEvent) -> np.ndarray:
+        """Year of event occurrence as int array (0 where event not occurred).
+
+        Args:
+            event: CVDEvent to extract year from.
+
+        Returns:
+            np.ndarray[int16]: Year values. 0 for vulnerabilities where
+                the event has not occurred (NaT timestamps).
+
+        Example:
+            >>> published_2024 = arr[arr.event_year(CVDEvent.P) == 2024]
+        """
+        timestamps = self._event_timestamps_absolute[event]
+        valid = ~np.isnat(timestamps)
+        result: np.ndarray = np.zeros(len(self), dtype=np.int16)
+        if valid.any():
+            result[valid] = timestamps[valid].astype("datetime64[Y]").astype(int) + 1970
+        return result
+
+    def event_month(self, event: CVDEvent) -> np.ndarray:
+        """Month of event occurrence as int array (0 where event not occurred).
+
+        Args:
+            event: CVDEvent to extract month from.
+
+        Returns:
+            np.ndarray[int8]: Month values (1-12). 0 for vulnerabilities where
+                the event has not occurred (NaT timestamps).
+
+        Example:
+            >>> q1_disclosures = arr[arr.event_month(CVDEvent.P) <= 3]
+        """
+        timestamps = self._event_timestamps_absolute[event]
+        valid = ~np.isnat(timestamps)
+        result: np.ndarray = np.zeros(len(self), dtype=np.int8)
+        if valid.any():
+            # months since epoch mod 12, +1 for 1-based
+            result[valid] = (
+                timestamps[valid].astype("datetime64[M]").astype(int) % 12 + 1
+            ).astype(np.int8)
+        return result
+
+    def event_age_days(self, event: CVDEvent) -> np.ndarray:
+        """Days elapsed since event occurrence (float32, NaN where not occurred).
+
+        Computes the number of days between the event timestamp and now,
+        useful for vulnerability age calculations and SLA tracking.
+
+        Args:
+            event: CVDEvent to compute age from.
+
+        Returns:
+            np.ndarray[float32]: Days since event. NaN for vulnerabilities
+                where the event has not occurred (NaT timestamps).
+
+        Example:
+            >>> old_vulns = arr[arr.event_age_days(CVDEvent.P) > 90]
+        """
+        timestamps = self._event_timestamps_absolute[event]
+        valid = ~np.isnat(timestamps)
+        result: np.ndarray = np.full(len(self), np.nan, dtype=np.float32)
+        if valid.any():
+            now = np.datetime64("now", "us")
+            delta = now - timestamps[valid]
+            result[valid] = delta.astype("timedelta64[s]").astype(np.float64) / 86400.0
+        return result
+
     @property
     def terminal_mask(self) -> np.ndarray:
         """
