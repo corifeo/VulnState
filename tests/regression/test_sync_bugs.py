@@ -43,8 +43,8 @@ class TestEpssSyncRegression:
 
         arr.import_kev(str(kev_file))
 
-        assert arr[0].enrichment.kev == True
-        assert arr.enrichment.kev[0] == True, "Array-level KEV must sync"
+        assert arr[0].enrichment.kev == True  # noqa: E712 - numpy bool
+        assert arr.enrichment.kev[0] == True, "Array-level KEV must sync"  # noqa: E712
 
 
 class TestDataFrameOverwriteRegression:

@@ -8,11 +8,11 @@ Tests for data integrity issues specific to a data import/manipulation library:
 - Lazy parsing edge cases
 """
 
-import numpy as np
-import pytest
 from datetime import datetime
 
-from vulnstate import CVDArray, CVDVulnerability, CVDEvent
+import numpy as np
+
+from vulnstate import CVDArray, CVDEvent, CVDVulnerability
 
 
 class TestSlicingBehavior:
