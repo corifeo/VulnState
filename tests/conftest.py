@@ -87,3 +87,34 @@ def large_array():
         vulns.append(v)
 
     return CVDArray(vulns)
+
+
+# =============================================================================
+# Additional shared fixtures (added during test reorganization)
+# =============================================================================
+
+
+@pytest.fixture
+def sample_vuln():
+    """Single vulnerability for unit tests (alias for single_vulnerability)."""
+    return CVDVulnerability("CVE-2024-TEST")
+
+
+@pytest.fixture
+def terminal_vuln():
+    """Vulnerability with all 6 events applied (terminal state)."""
+    from datetime import datetime, timedelta
+
+    vuln = CVDVulnerability("CVE-2024-TERMINAL")
+    base = datetime(2024, 1, 1)
+    for i, event_char in enumerate("VFDPXA"):
+        vuln.apply_event(CVDEvent[event_char], timestamp=base + timedelta(days=i))
+    return vuln
+
+
+@pytest.fixture
+def sample_array():
+    """Small array (5 items) for unit tests."""
+    return CVDArray([
+        CVDVulnerability(f"CVE-2024-{i:03d}") for i in range(5)
+    ])
