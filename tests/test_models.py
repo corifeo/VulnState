@@ -73,24 +73,6 @@ class TestArrayTimestamps:
         assert len(sliced.V) == 5
 
 
-class TestArrayCoreData:
-    """Tests for ArrayCoreData dataclass."""
-
-    def test_array_core_data_creation(self):
-        """ArrayCoreData holds vulnerabilities, states, and vuln_ids."""
-        from vulnstate.models import ArrayCoreData
-
-        n = 5
-        core = ArrayCoreData(
-            vulnerabilities=np.array([None] * n, dtype=object),
-            states=np.zeros(n, dtype=np.uint8),
-            vuln_ids=np.array(["v1", "v2", "v3", "v4", "v5"], dtype=object),
-        )
-        assert len(core.states) == n
-        assert core.states.dtype == np.uint8
-        assert len(core.vuln_ids) == n
-
-
 class TestArrayIdentifiers:
     """Tests for ArrayIdentifiers dataclass."""
 
@@ -174,6 +156,46 @@ class TestArrayProbabilities:
         )
         sliced = probs[:3]
         assert len(sliced.base_threat) == 3
+
+
+class TestArrayState:
+    """Tests for ArrayState dataclass."""
+
+    def test_array_state_creation(self):
+        """ArrayState holds bitmask array."""
+        from vulnstate.models import ArrayState
+
+        state = ArrayState(bitmask=np.array([0, 1, 3, 7, 63], dtype=np.uint8))
+        assert len(state) == 5
+        assert state.bitmask[0] == 0  # vfdpxa (no events)
+        assert state.bitmask[4] == 63  # VFDPXA (all events)
+
+    def test_array_state_slicing(self):
+        """ArrayState supports slicing."""
+        from vulnstate.models import ArrayState
+
+        state = ArrayState(bitmask=np.array([0, 1, 3, 7, 15], dtype=np.uint8))
+        sliced = state[1:4]
+        assert len(sliced) == 3
+        assert sliced.bitmask[0] == 1
+
+    def test_array_state_boolean_indexing(self):
+        """ArrayState supports boolean mask indexing."""
+        from vulnstate.models import ArrayState
+
+        state = ArrayState(bitmask=np.array([0, 1, 3, 7, 15], dtype=np.uint8))
+        mask = np.array([True, False, True, False, True])
+        filtered = state[mask]
+        assert len(filtered) == 3
+        assert list(filtered.bitmask) == [0, 3, 15]
+
+    def test_array_state_default_empty(self):
+        """ArrayState defaults to empty array."""
+        from vulnstate.models import ArrayState
+
+        state = ArrayState()
+        assert len(state) == 0
+        assert state.bitmask.dtype == np.uint8
 
 
 class TestAnalysisResult:
