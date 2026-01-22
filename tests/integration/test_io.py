@@ -693,8 +693,8 @@ class TestSerializationEdgeCases:
 # FILE IMPORT TESTS (from test_file_import.py)
 # ============================================================================
 
-# Test data directory
-DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+# Test data directory (shared at tests/data/)
+DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 
 
 class TestEPSSFileImport:
