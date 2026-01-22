@@ -20,7 +20,7 @@ Used by: io.py, analyzer.py
 
 import warnings
 from collections.abc import Iterator
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Optional, Union
 
 import numpy as np
@@ -29,7 +29,7 @@ import numpy.typing as npt
 if TYPE_CHECKING:
     import pandas as pd
 
-    from .constants import AntiDesiderataBit, DesiderataBit
+    from .constants import AntiDesiderataBit, DesiderataBit, FixPath, ThreatState
     from .models import AnalysisResult
 
 from .constants import (
@@ -349,22 +349,22 @@ class CVDArray:
 
     @property
     def state_ints(self) -> np.ndarray:
-        """Get states array as integers."""
+        """Raw state bitmask array (uint8, VFDPXA bit positions)."""
         return self.state.bitmask
 
     @state_ints.setter
     def state_ints(self, value: np.ndarray) -> None:
-        """Set states array as integers."""
+        """Raw state bitmask array (uint8, VFDPXA bit positions)."""
         self.state.bitmask = value
 
     @property
     def vuln_ids(self) -> np.ndarray:
-        """Get vulnerability IDs array."""
+        """Vulnerability UUID array (object dtype)."""
         return self.identifiers.vuln_id
 
     @vuln_ids.setter
     def vuln_ids(self, value: np.ndarray) -> None:
-        """Set vulnerability IDs array."""
+        """Vulnerability UUID array (object dtype)."""
         self.identifiers.vuln_id = value
 
     @property
@@ -390,32 +390,32 @@ class CVDArray:
 
     @property
     def V_timestamps(self) -> np.ndarray:
-        """Get V event timestamps."""
+        """Vendor awareness timestamps (datetime64[us], NaT if not occurred)."""
         return self.timestamps.V
 
     @property
     def F_timestamps(self) -> np.ndarray:
-        """Get F event timestamps."""
+        """Fix ready timestamps (datetime64[us], NaT if not occurred)."""
         return self.timestamps.F
 
     @property
     def D_timestamps(self) -> np.ndarray:
-        """Get D event timestamps."""
+        """Deployment timestamps (datetime64[us], NaT if not occurred)."""
         return self.timestamps.D
 
     @property
     def P_timestamps(self) -> np.ndarray:
-        """Get P event timestamps."""
+        """Public disclosure timestamps (datetime64[us], NaT if not occurred)."""
         return self.timestamps.P
 
     @property
     def X_timestamps(self) -> np.ndarray:
-        """Get X event timestamps."""
+        """Exploit public timestamps (datetime64[us], NaT if not occurred)."""
         return self.timestamps.X
 
     @property
     def A_timestamps(self) -> np.ndarray:
-        """Get A event timestamps."""
+        """Attack observed timestamps (datetime64[us], NaT if not occurred)."""
         return self.timestamps.A
 
     @property
@@ -510,75 +510,100 @@ class CVDArray:
 
     @property
     def severities(self) -> np.ndarray:
-        """Get severities analytics array.
+        """CVSS severity labels (object array: 'CRITICAL'/'HIGH'/'MEDIUM'/'LOW'/'NONE').
 
-        Note: Severities are stored in ArrayAnalytics, not computed by CVDAnalyzer.
+        Returns:
+            np.ndarray: Severity strings derived from CVSS base scores.
+
+        Note:
+            Stored in ArrayAnalytics, updated during sync().
         """
         return self.analytics.severities
 
     @property
     def fix_path(self) -> np.ndarray:
-        """Get fix path as uint8 array (FixPath enum values).
+        """VFD dimension as FixPath enum values (uint8 array).
 
-        Reads from AnalysisResult.fix_path_int computed by CVDAnalyzer.
+        Returns:
+            np.ndarray: 0=NO_AWARENESS, 1=VENDOR_AWARE, 3=FIX_READY, 7=REMEDIATED
+
+        Note:
+            Computed by CVDAnalyzer on first access, cached until invalidated.
         """
         return self.analysis.fix_path_int
 
     @property
     def threat_state(self) -> np.ndarray:
-        """Get threat state as uint8 array (ThreatState enum values).
+        """PXA dimension as ThreatState enum values (uint8 array).
 
-        Reads from AnalysisResult.threat_state_int computed by CVDAnalyzer.
+        Returns:
+            np.ndarray: 0=LATENT, 1=DISCLOSED, 2=WEAPONIZED, ..., 7=ACTIVE_ATTACK
+
+        Note:
+            Computed by CVDAnalyzer on first access, cached until invalidated.
         """
         return self.analysis.threat_state_int
 
     @property
     def is_zero_day(self) -> np.ndarray:
-        """Get is_zero_day analytics array.
+        """True if exploit (X) or attack (A) before vendor awareness (V) (bool array).
 
-        Reads from AnalysisResult.is_zero_day computed by CVDAnalyzer.
-        True if exploit (X) or attack (A) occurred before vendor awareness (V).
+        Returns:
+            np.ndarray[bool]: Zero-day status for each vulnerability.
+
+        Note:
+            Computed by CVDAnalyzer on first access, cached until invalidated.
         """
         return self.analysis.is_zero_day
 
     @property
     def is_fix_available(self) -> np.ndarray:
-        """Check if fix is available (F event occurred).
+        """True if fix is ready (F event occurred) (bool array).
 
-        Derived from state bits: True if F bit is set.
+        Returns:
+            np.ndarray[bool]: Derived directly from state bitmask.
         """
         return self.has_event_occurred(CVDEvent.F)
 
     @property
     def is_fix_deployed(self) -> np.ndarray:
-        """Check if fix is deployed (D event occurred).
+        """True if fix is deployed (D event occurred) (bool array).
 
-        Derived from state bits: True if D bit is set.
+        Returns:
+            np.ndarray[bool]: Derived directly from state bitmask.
         """
         return self.has_event_occurred(CVDEvent.D)
 
     @property
     def is_weaponized(self) -> np.ndarray:
-        """Check if public exploit exists (X event occurred).
+        """True if public exploit exists (X event occurred) (bool array).
 
-        Reads from AnalysisResult.is_weaponized computed by CVDAnalyzer.
+        Returns:
+            np.ndarray[bool]: From AnalysisResult.
+
+        Note:
+            Computed by CVDAnalyzer on first access, cached until invalidated.
         """
         return self.analysis.is_weaponized
 
     @property
     def is_under_attack(self) -> np.ndarray:
-        """Check if under active attack (A event occurred).
+        """True if under active attack (A event occurred) (bool array).
 
-        Derived from state bits: True if A bit is set.
+        Returns:
+            np.ndarray[bool]: Derived directly from state bitmask.
         """
         return self.has_event_occurred(CVDEvent.A)
 
     @property
     def is_premature_disclosure(self) -> np.ndarray:
-        """Get premature_disclosure analytics array.
+        """True if public disclosure (P) before fix ready (F) (bool array).
 
-        Reads from AnalysisResult.is_premature_disclosure computed by CVDAnalyzer.
-        True if P occurred before F (disclosure before fix ready).
+        Returns:
+            np.ndarray[bool]: From AnalysisResult.
+
+        Note:
+            Computed by CVDAnalyzer on first access, cached until invalidated.
         """
         return self.analysis.is_premature_disclosure
 
@@ -861,36 +886,46 @@ class CVDArray:
 
     @property
     def disclosure_window_days(self) -> np.ndarray:
-        """Get disclosure_window_days analytics array.
+        """Days between V (vendor awareness) and P (public disclosure) (float32).
 
-        Reads from AnalysisResult.disclosure_window_days computed by CVDAnalyzer.
-        Days between V (vendor awareness) and P (public disclosure).
+        Returns:
+            np.ndarray[float32]: Window in days. NaN if V or P not occurred.
+
+        Note:
+            Computed by CVDAnalyzer on first access, cached until invalidated.
         """
         return self.analysis.disclosure_window_days
 
     @property
     def fix_lag_days(self) -> np.ndarray:
-        """Get fix_lag_days analytics array.
+        """Days between V (vendor awareness) and F (fix ready) (float32).
 
-        Reads from AnalysisResult.fix_lag_days computed by CVDAnalyzer.
-        Days between V (vendor awareness) and F (fix ready).
+        Returns:
+            np.ndarray[float32]: Lag in days. NaN if V or F not occurred.
+
+        Note:
+            Computed by CVDAnalyzer on first access, cached until invalidated.
         """
         return self.analysis.fix_lag_days
 
     @property
     def deployment_lag_days(self) -> np.ndarray:
-        """Get deployment_lag_days analytics array.
+        """Days between F (fix ready) and D (fix deployed) (float32).
 
-        Reads from AnalysisResult.deployment_lag_days computed by CVDAnalyzer.
-        Days between F (fix ready) and D (fix deployed).
+        Returns:
+            np.ndarray[float32]: Lag in days. NaN if F or D not occurred.
+
+        Note:
+            Computed by CVDAnalyzer on first access, cached until invalidated.
         """
         return self.analysis.deployment_lag_days
 
     @property
     def violated_orderings_count(self) -> np.ndarray:
-        """Get count of violated ordering constraints.
+        """Number of violated event ordering constraints (int32, 0-12).
 
-        Computed from anti_desiderata_mask by counting set bits.
+        Returns:
+            np.ndarray[int32]: Count of set bits in anti_desiderata_mask.
         """
         # Count bits set in anti_desiderata_mask
         mask = self.analysis.anti_desiderata_mask
@@ -901,10 +936,13 @@ class CVDArray:
 
     @property
     def desiderata_score(self) -> np.ndarray:
-        """Get desiderata score analytics array (0.0 to 1.0).
+        """Fraction of satisfied desiderata (float32, 0.0-1.0).
 
-        Reads from AnalysisResult.desiderata_score computed by CVDAnalyzer.
-        Fraction of satisfied desiderata (desiderata_count / 12).
+        Returns:
+            np.ndarray[float32]: desiderata_count / 12 for each vulnerability.
+
+        Note:
+            Computed by CVDAnalyzer on first access, cached until invalidated.
         """
         return self.analysis.desiderata_score
 
@@ -920,10 +958,14 @@ class CVDArray:
 
     @property
     def anti_desiderata_mask(self) -> np.ndarray:
-        """Get anti-desiderata (violations) as uint16 bitmask array.
+        """Anti-desiderata (violations) as uint16 bitmask array.
 
-        Reads from AnalysisResult.anti_desiderata_mask computed by CVDAnalyzer.
-        Each bit corresponds to an AntiDesiderataBit.
+        Returns:
+            np.ndarray[uint16]: Each bit corresponds to an AntiDesiderataBit.
+                Complement of desiderata_mask.
+
+        Note:
+            Computed by CVDAnalyzer on first access, cached until invalidated.
         """
         return self.analysis.anti_desiderata_mask
 
@@ -985,9 +1027,13 @@ class CVDArray:
 
     @property
     def skill_score(self) -> np.ndarray:
-        """Get skill score analytics array.
+        """Stakeholder skill score (float32, 0.0-1.0).
 
-        Reads from AnalysisResult.skill_score computed by CVDAnalyzer.
+        Returns:
+            np.ndarray[float32]: Weighted desiderata score. NaN if insufficient data.
+
+        Note:
+            Computed by CVDAnalyzer on first access, cached until invalidated.
         """
         return self.analysis.skill_score
 
@@ -1005,17 +1051,17 @@ class CVDArray:
 
     @property
     def shape(self) -> tuple[int]:
-        """Shape of array (numpy convention)."""
+        """(N,) tuple."""
         return (len(self),)
 
     @property
     def ndim(self) -> int:
-        """Number of dimensions (always 1 for CVDArray)."""
+        """Always 1."""
         return 1
 
     @property
     def size(self) -> int:
-        """Total number of elements (numpy convention)."""
+        """Number of vulnerabilities (same as len())."""
         return len(self)
 
     @property
@@ -1232,6 +1278,50 @@ class CVDArray:
             state_int_to_string(state): int(count) for state, count in zip(unique_states, counts)
         }
 
+    def count_by_fix_path(self) -> "dict[FixPath, int]":
+        """
+        Count vulnerabilities by fix path dimension.
+
+        Returns:
+            Dictionary mapping FixPath enum values to counts.
+
+        Example:
+            >>> counts = arr.count_by_fix_path()
+            >>> counts[FixPath.REMEDIATED]
+            42
+        """
+        from .constants import FixPath
+
+        fix_path_arr = self.fix_path
+        result: dict[FixPath, int] = {}
+        for fp in FixPath:
+            count = int((fix_path_arr == fp).sum())
+            if count > 0:
+                result[fp] = count
+        return result
+
+    def count_by_threat_state(self) -> "dict[ThreatState, int]":
+        """
+        Count vulnerabilities by threat state dimension.
+
+        Returns:
+            Dictionary mapping ThreatState enum values to counts.
+
+        Example:
+            >>> counts = arr.count_by_threat_state()
+            >>> counts[ThreatState.WEAPONIZED]
+            15
+        """
+        from .constants import ThreatState
+
+        threat_arr = self.threat_state
+        result: dict[ThreatState, int] = {}
+        for ts in ThreatState:
+            count = int((threat_arr == ts).sum())
+            if count > 0:
+                result[ts] = count
+        return result
+
     @property
     def event_occurrence_counts(self) -> dict[str, int]:
         """
@@ -1410,7 +1500,12 @@ class CVDArray:
         return self._analysis_cache
 
     def invalidate_analysis(self) -> None:
-        """Invalidate the cached analysis (called after modifications)."""
+        """Invalidate the cached analysis, forcing recomputation on next access.
+
+        Note:
+            Call after modifying state_ints or timestamps directly (bypassing
+            apply_event/sync). The analysis property will recompute automatically.
+        """
         self._analysis_cache = None
 
     def reanalyze(self, infer: bool = True) -> "AnalysisResult":
@@ -1615,6 +1710,7 @@ class CVDArray:
     def to_dataframe(
         self,
         include_analytics: bool = True,
+        include_events: bool = False,
         explode_cvss: bool = True,
         explode_metadata: bool = True,
     ) -> "pd.DataFrame":
@@ -1623,6 +1719,7 @@ class CVDArray:
 
         Args:
             include_analytics: Include computed metrics (default True)
+            include_events: Add V, F, D, P, X, A columns as 0/1 flags (default False)
             explode_cvss: CVSS vector as separate columns (default True)
             explode_metadata: Unpack metadata dicts into columns (default True)
 
@@ -1630,12 +1727,14 @@ class CVDArray:
             pandas DataFrame with one row per vulnerability
 
         Example:
-            >>> df = arr.to_dataframe()
-            >>> df = arr.to_dataframe(explode_metadata=False)
+            >>> df = arr.to_dataframe(include_events=True)
+            >>> df[['cve_id', 'V', 'F', 'D', 'P', 'X', 'A']].head()
         """
         from vulnstate.io import CVDIO
 
-        return CVDIO.to_dataframe(self, include_analytics, explode_cvss, explode_metadata)
+        return CVDIO.to_dataframe(
+            self, include_analytics, include_events, explode_cvss, explode_metadata
+        )
 
     def to_json_batch(self, filepath: str, include_computed: bool = False) -> None:
         """
@@ -2108,6 +2207,115 @@ class CVDArray:
             vulns.append(vuln)
         return cls(vulns, fixed_size=True)
 
+    @classmethod
+    def generate(
+        cls,
+        size: int,
+        event_probs: Optional[dict[CVDEvent, float]] = None,
+        cvss_range: tuple[float, float] = (3.0, 10.0),
+        vendors: Optional[list[str]] = None,
+        seed: Optional[int] = None,
+    ) -> "CVDArray":
+        """
+        Generate a realistic sample dataset with configurable distributions.
+
+        Creates vulnerabilities with randomized events, CVSS scores, and vendor
+        assignments based on the provided probability distributions. Unlike random(),
+        this method produces realistic timelines with proper event ordering.
+
+        Args:
+            size: Number of vulnerabilities to generate
+            event_probs: Probability of each event occurring. Defaults:
+                V=1.0, F=0.7, D=0.4, P=0.5, X=0.2, A=0.1
+            cvss_range: Min/max CVSS base score range (default: 3.0-10.0)
+            vendors: List of vendor names to assign. Default:
+                ["VendorA", "VendorB", "VendorC", "VendorD", "VendorE"]
+            seed: Optional random seed for reproducibility
+
+        Returns:
+            CVDArray with generated vulnerabilities (not fixed-size)
+
+        Example:
+            >>> arr = CVDArray.generate(1000, seed=42)
+            >>> arr = CVDArray.generate(500, event_probs={CVDEvent.X: 0.5, CVDEvent.A: 0.3})
+        """
+        import random as rand_mod
+
+        if seed is not None:
+            np.random.seed(seed)
+            rand_mod.seed(seed)
+
+        default_probs: dict[CVDEvent, float] = {
+            CVDEvent.V: 1.0,
+            CVDEvent.F: 0.7,
+            CVDEvent.D: 0.4,
+            CVDEvent.P: 0.5,
+            CVDEvent.X: 0.2,
+            CVDEvent.A: 0.1,
+        }
+        if event_probs:
+            default_probs.update(event_probs)
+        probs = default_probs
+
+        if vendors is None:
+            vendors = ["VendorA", "VendorB", "VendorC", "VendorD", "VendorE"]
+
+        cvss_min, cvss_max = cvss_range
+
+        vulns: list[CVDVulnerability] = []
+        for i in range(size):
+            cve_id = f"CVE-2024-{i:05d}"
+            vendor = vendors[i % len(vendors)]
+            cvss = round(rand_mod.uniform(cvss_min, cvss_max), 1)
+
+            vuln = CVDVulnerability(
+                cve_id=cve_id,
+                vendor=vendor,
+                cvss_score=cvss,
+            )
+
+            # Base timestamp for this vulnerability
+            base = datetime(2024, 1, 1) + timedelta(days=i % 365)
+
+            # Apply events based on probabilities, respecting V→F→D constraint
+            if rand_mod.random() < probs[CVDEvent.V]:
+                vuln.apply_event(CVDEvent.V, timestamp=base)
+
+                if rand_mod.random() < probs[CVDEvent.F]:
+                    vuln.apply_event(
+                        CVDEvent.F,
+                        timestamp=base + timedelta(days=rand_mod.randint(5, 30)),
+                    )
+
+                    if rand_mod.random() < probs[CVDEvent.D]:
+                        vuln.apply_event(
+                            CVDEvent.D,
+                            timestamp=base + timedelta(days=rand_mod.randint(20, 60)),
+                        )
+
+            # P, X, A are independent of V→F→D
+            if rand_mod.random() < probs[CVDEvent.P]:
+                vuln.apply_event(
+                    CVDEvent.P,
+                    timestamp=base + timedelta(days=rand_mod.randint(1, 45)),
+                )
+
+            if rand_mod.random() < probs[CVDEvent.X]:
+                vuln.apply_event(
+                    CVDEvent.X,
+                    timestamp=base + timedelta(days=rand_mod.randint(0, 30)),
+                )
+
+            if rand_mod.random() < probs[CVDEvent.A]:
+                vuln.apply_event(
+                    CVDEvent.A,
+                    timestamp=base + timedelta(days=rand_mod.randint(5, 45)),
+                )
+
+            vulns.append(vuln)
+
+        return cls(vulns)
+
     # ==================== SCORING PROPERTIES ====================
 
     def _ensure_cvss_metrics_parsed(self) -> None:
@@ -2150,59 +2358,59 @@ class CVDArray:
 
     @property
     def cvss_scores(self) -> np.ndarray:
-        """CVSS base scores array."""
+        """CVSS base scores (float32, 0.0-10.0)."""
         return self.scoring.cvss_score
 
     @property
     def cve_vectors(self) -> np.ndarray:
-        """CVSS vector strings array (e.g., 'CVSS:3.1/AV:N/AC:L/...')."""
+        """CVSS vector strings (object array, e.g. 'CVSS:3.1/AV:N/AC:L/...')."""
         return self._metadata_raw.get("cve_vector", np.array([], dtype=object))
 
     @property
     def attack_vector(self) -> np.ndarray:
-        """Attack Vector: N (Network), A (Adjacent), L (Local), P (Physical)."""
+        """CVSS AV metric (object: N/A/L/P, None if unparsed)."""
         self._ensure_cvss_metrics_parsed()
         return self.scoring.attack_vector
 
     @property
     def attack_complexity(self) -> np.ndarray:
-        """Attack Complexity: L (Low), H (High)."""
+        """CVSS AC metric (object: L/H, None if unparsed)."""
         self._ensure_cvss_metrics_parsed()
         return self.scoring.attack_complexity
 
     @property
     def privileges_required(self) -> np.ndarray:
-        """Privileges Required: N (None), L (Low), H (High)."""
+        """CVSS PR metric (object: N/L/H, None if unparsed)."""
         self._ensure_cvss_metrics_parsed()
         return self.scoring.privileges_required
 
     @property
     def user_interaction(self) -> np.ndarray:
-        """User Interaction: N (None), R (Required)."""
+        """CVSS UI metric (object: N/R, None if unparsed)."""
         self._ensure_cvss_metrics_parsed()
         return self.scoring.user_interaction
 
     @property
     def scope(self) -> np.ndarray:
-        """Scope: U (Unchanged), C (Changed)."""
+        """CVSS S metric (object: U/C, None if unparsed)."""
         self._ensure_cvss_metrics_parsed()
         return self.scoring.scope
 
     @property
     def confidentiality_impact(self) -> np.ndarray:
-        """Confidentiality Impact: N (None), L (Low), H (High)."""
+        """CVSS C metric (object: N/L/H, None if unparsed)."""
         self._ensure_cvss_metrics_parsed()
         return self.scoring.confidentiality_impact
 
     @property
     def integrity_impact(self) -> np.ndarray:
-        """Integrity Impact: N (None), L (Low), H (High)."""
+        """CVSS I metric (object: N/L/H, None if unparsed)."""
         self._ensure_cvss_metrics_parsed()
         return self.scoring.integrity_impact
 
     @property
     def availability_impact(self) -> np.ndarray:
-        """Availability Impact: N (None), L (Low), H (High)."""
+        """CVSS A metric (object: N/L/H, None if unparsed)."""
         self._ensure_cvss_metrics_parsed()
         return self.scoring.availability_impact
 
@@ -2210,17 +2418,17 @@ class CVDArray:
 
     @property
     def epss(self) -> np.ndarray:
-        """EPSS scores (0.0-1.0)."""
+        """EPSS exploitation probability (float32, 0.0-1.0)."""
         return self.enrichment.epss
 
     @property
     def kev(self) -> np.ndarray:
-        """CISA KEV flag."""
+        """CISA KEV catalog membership (bool array)."""
         return self.enrichment.kev
 
     @property
     def epss_percentile(self) -> np.ndarray:
-        """EPSS percentile scores (0.0-1.0)."""
+        """EPSS percentile rank (float32, 0.0-1.0)."""
         return self.enrichment.epss_percentile
 
     @property
