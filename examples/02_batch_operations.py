@@ -94,9 +94,9 @@ def section_1_creating_arrays():
     ones = CVDArray.ones(5, vuln_id_prefix="TERM")
     randoms = CVDArray.random(5, vuln_id_prefix="RND", seed=42)
 
-    console.print(f"  zeros(5):  {set(zeros.states_as_strings)}")
-    console.print(f"  ones(5):   {set(ones.states_as_strings)}")
-    console.print(f"  random(5): {set(randoms.states_as_strings)}")
+    console.print(f"  zeros(5):  {set(zeros.states)}")
+    console.print(f"  ones(5):   {set(ones.states)}")
+    console.print(f"  random(5): {set(randoms.states)}")
     console.print()
 
 

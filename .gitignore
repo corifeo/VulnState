@@ -2,6 +2,7 @@
 examples/_archive/
 tests/_archive/
 docs/refs/
+docs/design/
 
 # Python
 __pycache__/

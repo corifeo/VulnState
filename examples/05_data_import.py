@@ -194,7 +194,7 @@ def section_3_kev_enrichment():
         if vuln.kev and shown < 5:
             table.add_row(
                 vuln.cve_id,
-                vuln.state,
+                vuln.state_str,
                 f"{vuln.cvss_score:.1f}",
                 "[red]YES[/red]",
             )
@@ -274,7 +274,7 @@ def section_4_combined_enrichment():
             f"{vuln.cvss_score:.1f}",
             f"{epss:.4f}",
             kev_status,
-            vuln.state,
+            vuln.state_str,
         )
 
     console.print(table)

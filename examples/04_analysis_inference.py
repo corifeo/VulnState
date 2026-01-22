@@ -177,7 +177,7 @@ def section_4_reanalysis():
 
     console.print()
     console.print("[bold]After import:[/bold]")
-    console.print(f"  States: {list(arr.states_as_strings)}")
+    console.print(f"  States: {list(arr.states)}")
     console.print(f"  has_fix_before_exploit: {result2.has_fix_before_exploit}")
     console.print()
 

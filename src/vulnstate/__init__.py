@@ -37,6 +37,7 @@ from .analyzer import CVDAnalyzer
 from .array import CVDArray
 from .constants import (
     DESIDERATA_PAIRS,
+    VALID_HISTORIES,
     AntiDesiderataBit,
     CVDEvent,
     DesiderataBit,
@@ -68,6 +69,7 @@ __all__ = [
     "AntiDesiderataBit",
     # Constants
     "DESIDERATA_PAIRS",
+    "VALID_HISTORIES",
     "TIMESTAMP_UNKNOWN",
     # Version
     "__version__",
