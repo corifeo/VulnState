@@ -142,6 +142,16 @@ class VulnerabilityState:
     events: dict[CVDEvent, Optional[datetime]] = field(default_factory=dict)
     history: list[dict[str, Any]] = field(default_factory=list)
 
+    def __str__(self) -> str:
+        """Return state string (e.g., 'VFdpxa') for print/f-strings."""
+        from .constants import state_int_to_string
+
+        return state_int_to_string(int(self.state_encoded))
+
+    def __repr__(self) -> str:
+        """Detailed repr for debugging."""
+        return f"VulnerabilityState(encoded={self.state_encoded}, events={len(self.events)})"
+
 
 # ==================== ARRAY DATACLASSES ====================
 
