@@ -290,9 +290,9 @@ class TestMLIntegration:
         arr = CVDArray.from_matrix(matrix, ["A", "B", "C"])
 
         assert len(arr) == 3
-        assert arr[0].state == "VFdpxa"
-        assert arr[1].state == "VfdPxa"
-        assert arr[2].state == "vfdpxa"
+        assert arr[0].state_str == "VFdpxa"
+        assert arr[1].state_str == "VfdPxa"
+        assert arr[2].state_str == "vfdpxa"
 
     def test_from_matrix_round_trip(self):
         """Verify from_matrix→to_matrix round-trip."""

@@ -98,7 +98,7 @@ class TestStateLabels:
 
         # After applying P event, label should update
         vuln.apply_event(CVDEvent.P)
-        assert "P" in vuln.state or vuln.state_label is not None
+        assert "P" in vuln.state_str or vuln.state_label is not None
 
 
 class TestFactoryMethods:

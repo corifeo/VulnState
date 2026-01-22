@@ -169,6 +169,50 @@ class TestEnrichment:
         assert arr[0].kev == True  # noqa: E712
         assert arr[1].kev == False  # noqa: E712
 
+    def test_import_epss_syncs_to_array_level(self):
+        """import_epss updates both vuln objects AND array-level arr.epss property.
+
+        This test catches the bug where import_epss would update vuln.epss but
+        not sync to arr.enrichment.epss, causing arr.epss to return all NaN.
+        """
+        arr = CVDArray(
+            [
+                CVDVulnerability("CVE-2024-001"),
+                CVDVulnerability("CVE-2024-002"),
+            ]
+        )
+        epss_data = {"CVE-2024-001": 0.85, "CVE-2024-002": 0.15}
+
+        CVDIO.import_epss(arr, epss_data)
+
+        # Check both object-level AND array-level access
+        assert arr[0].epss == 0.85  # Object access
+        assert arr[1].epss == 0.15
+        assert arr.epss[0] == 0.85  # Array-level property access
+        assert arr.epss[1] == 0.15
+
+    def test_import_kev_syncs_to_array_level(self):
+        """import_kev updates both vuln objects AND array-level arr.kev property.
+
+        This test catches the bug where import_kev would update vuln.kev but
+        not sync to arr.enrichment.kev, causing arr.kev to return all False.
+        """
+        arr = CVDArray(
+            [
+                CVDVulnerability("CVE-2024-001"),
+                CVDVulnerability("CVE-2024-002"),
+            ]
+        )
+        kev_data = {"CVE-2024-001": {"dateAdded": "2021-11-03"}}
+
+        CVDIO.import_kev(arr, kev_data, apply_event=False)
+
+        # Check both object-level AND array-level access
+        assert arr[0].kev == True  # noqa: E712 - Object access
+        assert arr[1].kev == False  # noqa: E712
+        assert arr.kev[0] == True  # noqa: E712 - Array-level property access
+        assert arr.kev[1] == False  # noqa: E712
+
 
 class TestNVDImport:
     """Tests for NVD format import."""
@@ -1369,9 +1413,9 @@ class TestDataFrameIntegration:
         df = arr.to_dataframe(include_analytics=True)
 
         assert len(df) == 0, "Empty array should produce empty DataFrame"
-        # Empty array produces DataFrame with no columns (expected behavior)
-        # This is because array_to_dicts returns empty list -> pd.DataFrame([]) has no columns
-        assert len(df.columns) == 0
+        # Empty array should still have column schema for downstream compatibility
+        assert "cve_id" in df.columns
+        assert "state" in df.columns
 
     def test_to_dataframe_preserves_values_across_roundtrip(self):
         """Verify serialization round-trip preserves new analytical property values."""
@@ -1398,6 +1442,36 @@ class TestDataFrameIntegration:
         assert df.loc[0, "has_fix_before_exploit"] == arr.has_fix_before_exploit[0]
         assert df.loc[0, "has_fix_before_attack"] == arr.has_fix_before_attack[0]
         assert df.loc[0, "is_mass_exploitation"] == arr.is_mass_exploitation[0]
+
+    def test_to_dataframe_enrichment_not_overwritten_by_metadata(self):
+        """Verify enrichment data (epss, kev) is not overwritten by metadata during export.
+
+        This test catches the bug where explode_metadata=True would overwrite the
+        correct arr.epss/arr.kev values with stale metadata arrays.
+        """
+        # Create array with metadata (simulates import_nvd which initializes metadata)
+        v1 = CVDVulnerability("CVE-2024-001")
+        v2 = CVDVulnerability("CVE-2024-002")
+        arr = CVDArray([v1, v2])
+
+        # Simulate the metadata structure that import_nvd creates (all NaN initially)
+        import numpy as np
+
+        arr._metadata_raw["epss"] = np.array([np.nan, np.nan], dtype=np.float32)
+        arr._metadata_raw["kev"] = np.array([False, False], dtype=bool)
+
+        # Now import enrichment data (this updates arr.enrichment, not metadata)
+        CVDIO.import_epss(arr, {"CVE-2024-001": 0.85, "CVE-2024-002": 0.15})
+        CVDIO.import_kev(arr, {"CVE-2024-001": {"dateAdded": "2021-11-03"}}, apply_event=False)
+
+        # Export with explode_metadata=True - this should NOT overwrite enrichment
+        df = arr.to_dataframe(include_analytics=False, explode_metadata=True)
+
+        # Verify enrichment data is correctly exported (not overwritten by stale metadata)
+        assert df.loc[0, "epss"] == 0.85, "EPSS should come from enrichment, not metadata"
+        assert df.loc[1, "epss"] == 0.15
+        assert df.loc[0, "kev"] == True, "KEV should come from enrichment"  # noqa: E712
+        assert df.loc[1, "kev"] == False  # noqa: E712
 
 
 class TestSerializationRoundTrip:
@@ -1598,7 +1672,7 @@ class TestNVDMetadataExtraction:
         assert products == ["exchange", "log4j", "struts"]  # Sorted, unique
 
     def test_create_vuln_from_item_stores_cpes_in_metadata(self):
-        """create_vuln_from_item stores CPEs and vendor/product lists in metadata."""
+        """create_vuln_from_item stores CPE strings in metadata (vendors/products parsed lazily)."""
         from vulnstate.parsers import NVDParser
 
         item = {
@@ -1626,12 +1700,14 @@ class TestNVDMetadataExtraction:
         assert "cpe_strings" in vuln.metadata
         assert len(vuln.metadata["cpe_strings"]) == 2
 
-        # Vendors and products extracted as lists
-        assert vuln.metadata["vendors"] == ["apache"]  # Unique, sorted
-        assert vuln.metadata["products"] == ["log4j", "struts"]  # Unique, sorted
+        # Vendors and products are parsed lazily during export (not stored in metadata)
+        # Verify they can still be extracted via extract_vendors_products
+        vendors, products = NVDParser.extract_vendors_products(vuln.metadata["cpe_strings"])
+        assert vendors == ["apache"]  # Unique, sorted
+        assert products == ["log4j", "struts"]  # Unique, sorted
 
     def test_create_vuln_from_item_stores_metadata(self):
-        """create_vuln_from_item stores parsed metadata fields."""
+        """create_vuln_from_item stores parsed metadata fields (vendors/products parsed lazily)."""
         from vulnstate.parsers import NVDParser
 
         item = {
@@ -1661,7 +1737,10 @@ class TestNVDMetadataExtraction:
         assert vuln.metadata["description"] == "Test description"
         assert vuln.metadata["cwe_ids"] == ["CWE-79"]
         assert vuln.metadata["severity"] == "CRITICAL"
-        assert vuln.metadata["vendors"] == ["apache"]  # List of vendors
-        assert vuln.metadata["products"] == ["log4j"]  # List of products
+        # Vendors/products are parsed lazily, verify cpe_strings is stored
+        assert "cpe_strings" in vuln.metadata
+        vendors, products = NVDParser.extract_vendors_products(vuln.metadata["cpe_strings"])
+        assert vendors == ["apache"]  # List of vendors
+        assert products == ["log4j"]  # List of products
         assert vuln.metadata["published_date"] == "2024-01-15T00:00:00Z"
         assert vuln.metadata["last_modified"] == "2024-01-20T00:00:00Z"
