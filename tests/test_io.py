@@ -44,7 +44,7 @@ class TestCVDIO:
         vuln = CVDIO.from_dict(data)
 
         assert vuln.cve_id == "CVE-2024-5678"
-        assert vuln.state == "Vfdpxa"
+        assert vuln.state_str == "Vfdpxa"
 
     def test_to_json_roundtrip(self):
         """JSON roundtrip preserves data."""
@@ -209,7 +209,7 @@ class TestNVDImport:
 
         assert len(arr) == 1
         # Should have P event from published date
-        assert "P" in arr[0].state  # uppercase P means event occurred
+        assert "P" in arr[0].state_str  # uppercase P means event occurred
 
 
 # ============================================================================
@@ -277,7 +277,8 @@ class TestDictSerialization:
         vuln2 = CVDVulnerability.from_dict(data)
 
         assert vuln2.cve_id == vuln.cve_id
-        assert vuln2.state == vuln.state
+        assert vuln2.state_str == vuln.state_str
+        assert vuln2.state.state_encoded == vuln.state.state_encoded
 
     def test_from_dict_with_metadata(self):
         """Test from_dict preserves metadata."""
@@ -325,7 +326,8 @@ class TestJSONSerialization:
         vuln2 = CVDVulnerability.from_json(json_str)
 
         assert vuln2.cve_id == vuln.cve_id
-        assert vuln2.state == vuln.state
+        assert vuln2.state_str == vuln.state_str
+        assert vuln2.state.state_encoded == vuln.state.state_encoded
         assert vuln2.history_string == vuln.history_string
 
     def test_save_load_json_file(self, tmp_path):
@@ -392,7 +394,8 @@ class TestPickleSerialization:
 
         # Verify complete reconstruction
         assert vuln2.cve_id == vuln.cve_id
-        assert vuln2.state == vuln.state
+        assert vuln2.state_str == vuln.state_str
+        assert vuln2.state.state_encoded == vuln.state.state_encoded
         assert vuln2.cvss_score == 9.8
 
     def test_pickle_preserves_datetime_exactly(self, tmp_path):
@@ -558,7 +561,7 @@ class TestRoundtripIntegrity:
 
         # Verify all data
         assert vuln2.cve_id == "ROUNDTRIP-001"
-        assert vuln2.state == "VFDpxa"  # V, F, and D applied
+        assert vuln2.state_str == "VFDpxa"  # V, F, and D applied
         assert vuln2.state_label == "VFD"  # Fix deployed
         assert vuln2.history_string == "VFD"
         assert vuln2.metadata["vendor"] == "Linux"
@@ -600,7 +603,7 @@ class TestSerializationEdgeCases:
         vuln2 = CVDVulnerability.from_json(json_str)
 
         assert data["state"] == "vfdpxa"
-        assert vuln2.state == "vfdpxa"
+        assert vuln2.state_str == "vfdpxa"
         assert vuln2.history_string == ""
 
     def test_special_characters_in_metadata(self):
