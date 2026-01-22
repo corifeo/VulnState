@@ -54,11 +54,11 @@ class CVDFormatter:
 
         # Header with ID and state
         lines.append(f"[bold blue]Vulnerability:[/bold blue] {vuln.cve_id or vuln.vuln_id}")
-        lines.append(f"[bold blue]State:[/bold blue] {vuln.state}")
+        lines.append(f"[bold blue]State:[/bold blue] {vuln.state_str}")
         lines.append(f"[bold blue]Description:[/bold blue] {vuln.state_description}")
 
         # Fix Path (VFD portion of state) and history
-        fix_path_text = vuln.state[:3]  # First 3 chars are VFD (fix path)
+        fix_path_text = vuln.state_str[:3]  # First 3 chars are VFD (fix path)
         lines.append(f"[bold blue]Fix Path:[/bold blue] {fix_path_text}")
         lines.append(f"[bold blue]History:[/bold blue] {vuln.history_string}")
 
@@ -252,7 +252,7 @@ class CVDFormatter:
         table.add_column("Description", style=CVDFormatter.COLOR_MUTED)
 
         # Fix Path (VFD)
-        fix_path = vuln.state[:3]
+        fix_path = vuln.state_str[:3]
         fix_path_color = CVDFormatter._get_fix_path_color(fix_path)
         fix_path_desc = {
             "vfd": "NO_AWARENESS - Vendor unaware",
@@ -266,7 +266,7 @@ class CVDFormatter:
         )
 
         # Threat State (PXA)
-        threat_state = vuln.state[3:]
+        threat_state = vuln.state_str[3:]
         threat_state_desc = {
             "pxa": "LATENT - No disclosure",
             "Pxa": "DISCLOSED - Publicly known",

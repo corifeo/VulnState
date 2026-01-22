@@ -218,7 +218,10 @@ class ArrayScoring:
     )
     cvss_impact_score: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
 
-    # CVSS 3.x Base Metrics (parsed from cve_vector)
+    # Raw CVSS vector strings (for lazy metric parsing)
+    cve_vector: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
+
+    # CVSS 3.x Base Metrics (parsed from cve_vector lazily)
     attack_vector: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
     attack_complexity: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
     privileges_required: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
@@ -235,6 +238,7 @@ class ArrayScoring:
             cvss_score=self.cvss_score[key],
             cvss_exploitability_score=self.cvss_exploitability_score[key],
             cvss_impact_score=self.cvss_impact_score[key],
+            cve_vector=self.cve_vector[key],
             attack_vector=self.attack_vector[key],
             attack_complexity=self.attack_complexity[key],
             privileges_required=self.privileges_required[key],
@@ -610,7 +614,6 @@ class ArrayAnalytics:
     )
 
 
-
 @dataclass
 class ArrayMetadata:
     """Metadata and backward compatibility fields."""
@@ -760,5 +763,3 @@ def compute_history_id(state: ArrayState, timestamps: ArrayTimestamps) -> np.nda
         # else: remains 255 (invalid history - should not happen with valid data)
 
     return result
-
-
