@@ -169,49 +169,7 @@ class TestEnrichment:
         assert arr[0].kev == True  # noqa: E712
         assert arr[1].kev == False  # noqa: E712
 
-    def test_import_epss_syncs_to_array_level(self):
-        """import_epss updates both vuln objects AND array-level arr.epss property.
-
-        This test catches the bug where import_epss would update vuln.epss but
-        not sync to arr.enrichment.epss, causing arr.epss to return all NaN.
-        """
-        arr = CVDArray(
-            [
-                CVDVulnerability("CVE-2024-001"),
-                CVDVulnerability("CVE-2024-002"),
-            ]
-        )
-        epss_data = {"CVE-2024-001": 0.85, "CVE-2024-002": 0.15}
-
-        CVDIO.import_epss(arr, epss_data)
-
-        # Check both object-level AND array-level access
-        assert arr[0].epss == 0.85  # Object access
-        assert arr[1].epss == 0.15
-        assert arr.epss[0] == 0.85  # Array-level property access
-        assert arr.epss[1] == 0.15
-
-    def test_import_kev_syncs_to_array_level(self):
-        """import_kev updates both vuln objects AND array-level arr.kev property.
-
-        This test catches the bug where import_kev would update vuln.kev but
-        not sync to arr.enrichment.kev, causing arr.kev to return all False.
-        """
-        arr = CVDArray(
-            [
-                CVDVulnerability("CVE-2024-001"),
-                CVDVulnerability("CVE-2024-002"),
-            ]
-        )
-        kev_data = {"CVE-2024-001": {"dateAdded": "2021-11-03"}}
-
-        CVDIO.import_kev(arr, kev_data, apply_event=False)
-
-        # Check both object-level AND array-level access
-        assert arr[0].kev == True  # noqa: E712 - Object access
-        assert arr[1].kev == False  # noqa: E712
-        assert arr.kev[0] == True  # noqa: E712 - Array-level property access
-        assert arr.kev[1] == False  # noqa: E712
+    # NOTE: Sync regression tests moved to tests/regression/test_sync_bugs.py
 
 
 class TestNVDImport:
