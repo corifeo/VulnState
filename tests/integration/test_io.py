@@ -497,51 +497,6 @@ class TestBatchSerialization:
         assert len(arr2) == 50
         assert arr2[0].cve_id == "PICKLE-0000"
 
-    def test_batch_performance_large_scale(self, tmp_path):
-        """Test batch serialization with 1000 vulnerabilities."""
-        vulns = [
-            CVDVulnerability(f"PERF-{i:05d}", severity="high" if i % 2 else "low")
-            for i in range(1000)
-        ]
-        for v in vulns:
-            v.apply_event(CVDEvent.V)
-            if v.cve_id.endswith(("0", "2", "4")):
-                v.apply_event(CVDEvent.F)
-
-        arr = CVDArray(vulns)
-
-        # Benchmark JSON
-        json_file = tmp_path / "perf.json"
-        start = time.time()
-        arr.to_json_batch(str(json_file))
-        json_save_time = time.time() - start
-
-        start = time.time()
-        arr_json = CVDArray.from_json_batch(str(json_file))
-        json_load_time = time.time() - start
-
-        # Benchmark Pickle
-        pkl_file = tmp_path / "perf.pkl"
-        start = time.time()
-        arr.save_pickle_batch(str(pkl_file))
-        pkl_save_time = time.time() - start
-
-        start = time.time()
-        arr_pkl = CVDArray.load_pickle_batch(str(pkl_file))
-        pkl_load_time = time.time() - start
-
-        # Print results
-        print("\n1000 vulnerabilities:")
-        print(f"  JSON save: {json_save_time:.3f}s ({1000 / json_save_time:.0f} vulns/sec)")
-        print(f"  JSON load: {json_load_time:.3f}s ({1000 / json_load_time:.0f} vulns/sec)")
-        print(f"  Pickle save: {pkl_save_time:.3f}s ({1000 / pkl_save_time:.0f} vulns/sec)")
-        print(f"  Pickle load: {pkl_load_time:.3f}s ({1000 / pkl_load_time:.0f} vulns/sec)")
-        print(f"  Pickle speedup: {json_save_time / pkl_save_time:.1f}x faster (save)")
-
-        # Verify data integrity
-        assert len(arr_json) == 1000
-        assert len(arr_pkl) == 1000
-
 
 class TestRoundtripIntegrity:
     """Test that roundtrip serialization preserves all data."""

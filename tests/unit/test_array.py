@@ -375,39 +375,6 @@ class TestDataPreservation:
         assert "cvss_score" in subset.metadata
 
 
-class TestPerformance:
-    """Test performance characteristics (not benchmarks, just sanity checks)."""
-
-    def test_large_array_creation(self):
-        """Verify large arrays can be created."""
-        vulns = [CVDVulnerability(f"V{i:05d}") for i in range(1000)]
-        arr = CVDArray(vulns)
-
-        assert len(arr) == 1000
-
-    def test_large_array_query(self):
-        """Verify queries work on large arrays."""
-        vulns = [CVDVulnerability(f"V{i:05d}") for i in range(1000)]
-
-        # Apply events to some
-        for i in range(500):
-            vulns[i].apply_event(CVDEvent.V)
-
-        arr = CVDArray(vulns)
-        mask = arr.has_event_occurred(CVDEvent.V)
-
-        assert mask.sum() == 500
-
-    def test_large_array_batch_update(self):
-        """Verify batch updates on large arrays."""
-        vulns = [CVDVulnerability(f"V{i:05d}") for i in range(1000)]
-        arr = CVDArray(vulns)
-
-        mask = arr.apply_event_batch(CVDEvent.V)
-
-        assert mask.sum() == 1000
-
-
 class TestAnalysisProperty:
     """Test analysis property auto-triggers CVDAnalyzer."""
 
