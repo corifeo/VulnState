@@ -136,11 +136,13 @@ class VulnerabilityState:
         state_encoded: 6-bit bitmask encoding which events have occurred (VFDPXA).
         events: Dict mapping CVDEvent to timestamp (or None for unknown timestamp).
         history: List of state transition records.
+        inferred_events: Set of events that were inferred (not from authoritative sources).
     """
 
     state_encoded: np.uint8 = field(default_factory=lambda: np.uint8(0))
     events: dict[CVDEvent, Optional[datetime]] = field(default_factory=dict)
     history: list[dict[str, Any]] = field(default_factory=list)
+    inferred_events: set[CVDEvent] = field(default_factory=set)
 
     def __str__(self) -> str:
         """Return state string (e.g., 'VFdpxa') for print/f-strings."""
