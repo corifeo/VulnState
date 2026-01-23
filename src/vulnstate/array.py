@@ -1266,9 +1266,9 @@ class CVDArray:
         result: np.ndarray = np.zeros(len(self), dtype=np.int8)
         if valid.any():
             # months since epoch mod 12, +1 for 1-based
-            result[valid] = (
-                timestamps[valid].astype("datetime64[M]").astype(int) % 12 + 1
-            ).astype(np.int8)
+            result[valid] = (timestamps[valid].astype("datetime64[M]").astype(int) % 12 + 1).astype(
+                np.int8
+            )
         return result
 
     def event_age_days(self, event: CVDEvent) -> np.ndarray:
@@ -1845,6 +1845,8 @@ class CVDArray:
         include: Optional[list[str]] = None,
         exclude: Optional[list[str]] = None,
         skip_existing: bool = False,
+        infer_vendor: bool = True,
+        infer_timestamps: bool = True,
     ) -> None:
         """
         Import NVD vulnerability data.
@@ -1856,6 +1858,8 @@ class CVDArray:
             include: Only import these metadata fields
             exclude: Skip these metadata fields
             skip_existing: Skip CVEs already in array (default: False)
+            infer_vendor: Infer V event from publishedDate (default: True)
+            infer_timestamps: Use proxy timestamps for inferred events (default: True)
 
         Example:
             >>> arr = CVDArray()
@@ -1866,7 +1870,15 @@ class CVDArray:
         from vulnstate.io import CVDIO
 
         CVDIO.import_nvd(
-            self, source, apply_event, import_metadata, include, exclude, skip_existing
+            self,
+            source,
+            apply_event,
+            import_metadata,
+            include,
+            exclude,
+            skip_existing,
+            infer_vendor=infer_vendor,
+            infer_timestamps=infer_timestamps,
         )
 
     def import_nvd_glob(

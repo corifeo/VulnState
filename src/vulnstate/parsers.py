@@ -434,7 +434,11 @@ class NVDParser:
 
     @staticmethod
     def create_vuln_from_item(
-        cve_id: str, item: dict[str, Any], format_version: str = "1.1"
+        cve_id: str,
+        item: dict[str, Any],
+        format_version: str = "1.1",
+        infer_vendor: bool = True,
+        infer_timestamps: bool = True,
     ) -> "CVDVulnerability":
         """
         Create a CVDVulnerability from an NVD item.
@@ -444,6 +448,12 @@ class NVDParser:
         - cpe_strings, vendors, products: From CPE (stored in metadata as lists)
         - description, cwe_ids, severity, published_date, last_modified: Parsed metadata
 
+        Infers events from reference tags:
+        - "Patch" tag -> F event (fix available)
+        - "Exploit" tag -> X event (exploit public)
+        - "Vendor Advisory" tag -> V event at publishedDate
+        - "Third Party Advisory" tag -> V event at lastModifiedDate
+
         Note: A CVE can affect multiple vendors/products, so these are stored as
         lists in metadata rather than single values.
 
@@ -451,6 +461,9 @@ class NVDParser:
             cve_id: CVE identifier
             item: NVD vulnerability item
             format_version: "1.1" or "2.0"
+            infer_vendor: If True, infer V event from publishedDate (default True)
+            infer_timestamps: If True, use proxy timestamps for inferred events;
+                if False, set timestamp to None (default True)
 
         Returns:
             CVDVulnerability instance with all extracted data
@@ -503,6 +516,58 @@ class NVDParser:
         if last_modified:
             vuln.metadata["last_modified"] = last_modified
 
+        # Parse proxy timestamps for inferred events (reuse already-extracted strings)
+        published_dt: Optional[datetime] = None
+        last_modified_dt: Optional[datetime] = None
+        try:
+            if published_date:
+                published_dt = datetime.fromisoformat(published_date.replace("Z", "+00:00"))
+            if last_modified:
+                last_modified_dt = datetime.fromisoformat(last_modified.replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            pass
+
+        # Apply V from publishedDate if infer_vendor=True (default behavior)
+        if infer_vendor and published_dt:
+            v_ts = published_dt if infer_timestamps else None
+            with contextlib.suppress(ValueError):
+                vuln.apply_event(CVDEvent.V, timestamp=v_ts, inferred=True)
+
+        # Detect events from reference tags
+        ref_tags = NVDParser.extract_reference_tags(item, format_version)
+
+        # Store tags for later use by infer_events()
+        if ref_tags:
+            vuln.metadata["ref_tags"] = list(ref_tags)
+
+        # V from advisory tags (more specific signal than V-from-publishedDate)
+        if "Vendor Advisory" in ref_tags:
+            v_ts = published_dt if infer_timestamps else None
+            with contextlib.suppress(ValueError):
+                if vuln.has_event_occurred(CVDEvent.V):
+                    vuln.events[CVDEvent.V] = v_ts
+                else:
+                    vuln.apply_event(CVDEvent.V, timestamp=v_ts, inferred=True)
+        elif "Third Party Advisory" in ref_tags:
+            v_ts = last_modified_dt if infer_timestamps else None
+            with contextlib.suppress(ValueError):
+                if vuln.has_event_occurred(CVDEvent.V):
+                    vuln.events[CVDEvent.V] = v_ts
+                else:
+                    vuln.apply_event(CVDEvent.V, timestamp=v_ts, inferred=True)
+
+        # F from Patch tag (100% reliable - patch exists)
+        if "Patch" in ref_tags:
+            f_ts = last_modified_dt if infer_timestamps else None
+            with contextlib.suppress(ValueError):
+                vuln.apply_event(CVDEvent.F, timestamp=f_ts, inferred=True)
+
+        # X from Exploit tag
+        if "Exploit" in ref_tags:
+            x_ts = last_modified_dt if infer_timestamps else None
+            with contextlib.suppress(ValueError):
+                vuln.apply_event(CVDEvent.X, timestamp=x_ts, inferred=True)
+
         return vuln
 
     @staticmethod
@@ -514,6 +579,8 @@ class NVDParser:
         include: Optional[list[str]] = None,
         exclude: Optional[list[str]] = None,
         skip_existing: bool = False,
+        infer_vendor: bool = True,
+        infer_timestamps: bool = True,
     ) -> None:
         """
         Import NVD vulnerability data (supports both 1.1 and 2.0 formats).
@@ -526,6 +593,8 @@ class NVDParser:
             include: Only import these metadata fields
             exclude: Skip these metadata fields
             skip_existing: Skip CVEs already in array (default False)
+            infer_vendor: Infer V event from publishedDate (default True)
+            infer_timestamps: Use proxy timestamps for inferred events (default True)
 
         Note:
             Automatically detects NVD format version (1.1 or 2.0) and parses accordingly.
@@ -590,7 +659,13 @@ class NVDParser:
                 if not cve_id:
                     continue
 
-                vuln = NVDParser.create_vuln_from_item(cve_id, item, format_version)
+                vuln = NVDParser.create_vuln_from_item(
+                    cve_id,
+                    item,
+                    format_version,
+                    infer_vendor=infer_vendor,
+                    infer_timestamps=infer_timestamps,
+                )
 
                 # Store metadata if requested
                 if import_metadata:
@@ -682,7 +757,13 @@ class NVDParser:
                         vuln.metadata["nvd"].update(metadata_dict)
             else:
                 # Create new vulnerability
-                vuln = NVDParser.create_vuln_from_item(cve_id, item, format_version)
+                vuln = NVDParser.create_vuln_from_item(
+                    cve_id,
+                    item,
+                    format_version,
+                    infer_vendor=infer_vendor,
+                    infer_timestamps=infer_timestamps,
+                )
 
                 # Store metadata if requested
                 if import_metadata:

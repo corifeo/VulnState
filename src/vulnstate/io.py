@@ -477,12 +477,22 @@ class CVDIO:
         include: Optional[list[str]] = None,
         exclude: Optional[list[str]] = None,
         skip_existing: bool = False,
+        infer_vendor: bool = True,
+        infer_timestamps: bool = True,
     ) -> None:
         """Import NVD data (delegates to NVDParser)."""
         from .parsers import NVDParser
 
         return NVDParser.import_nvd(
-            arr, source, apply_event, import_metadata, include, exclude, skip_existing
+            arr,
+            source,
+            apply_event,
+            import_metadata,
+            include,
+            exclude,
+            skip_existing,
+            infer_vendor=infer_vendor,
+            infer_timestamps=infer_timestamps,
         )
 
     @staticmethod
@@ -513,6 +523,7 @@ class CVDIO:
     def to_dataframe(
         arr: "CVDArray",
         include_analytics: bool = True,
+        include_events: bool = False,
         explode_cvss: bool = True,
         explode_metadata: bool = True,
     ) -> "pd.DataFrame":
@@ -522,6 +533,7 @@ class CVDIO:
         Args:
             arr: CVDArray instance
             include_analytics: Include computed analytics fields (default True)
+            include_events: Add V, F, D, P, X, A columns as 0/1 flags (default False)
             explode_cvss: Explode CVSS vector into separate columns (default True)
             explode_metadata: Flatten metadata dicts into columns (default True)
 
@@ -540,6 +552,11 @@ class CVDIO:
             "kev": arr.kev,
             "state_label": arr.state_labels,
         }
+
+        # Add event flags as 0/1 columns (vectorized)
+        if include_events:
+            for event in CVDEvent:
+                data[event.name] = arr.has_event_occurred(event).astype(np.int8)
 
         # Add CVSS metrics (vectorized)
         data["attack_vector"] = arr.attack_vector

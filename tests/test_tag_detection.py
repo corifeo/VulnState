@@ -82,10 +82,134 @@ class TestExtractReferenceTags:
         item = {
             "cve": {
                 "CVE_data_meta": {"ID": "CVE-2023-0001"},
-                "references": {
-                    "reference_data": [{"url": "https://example.com", "tags": []}]
-                },
+                "references": {"reference_data": [{"url": "https://example.com", "tags": []}]},
             }
         }
         tags = NVDParser.extract_reference_tags(item, "1.1")
         assert tags == set()
+
+
+class TestTagEventDetection:
+    """import_nvd applies events from reference tags."""
+
+    def _make_nvd_item(
+        self, tags_list, published="2023-01-15T00:00Z", last_modified="2023-06-15T00:00Z"
+    ):
+        """Helper: create NVD 1.1 item with given reference tags."""
+        return {
+            "cve": {
+                "CVE_data_meta": {"ID": "CVE-2023-9999"},
+                "description": {"description_data": [{"lang": "en", "value": "Test"}]},
+                "references": {
+                    "reference_data": [{"url": "https://example.com", "tags": tags_list}]
+                },
+            },
+            "publishedDate": published,
+            "lastModifiedDate": last_modified,
+            "impact": {},
+            "configurations": {"nodes": []},
+        }
+
+    def test_patch_tag_applies_F(self):
+        from vulnstate import CVDArray
+
+        arr = CVDArray()
+        item = self._make_nvd_item(["Patch"])
+        arr.import_nvd([item])
+        vuln = arr.get(0)
+        assert vuln.has_event_occurred(CVDEvent.F)
+        assert CVDEvent.F in vuln.state.inferred_events
+
+    def test_exploit_tag_applies_X(self):
+        from vulnstate import CVDArray
+
+        arr = CVDArray()
+        item = self._make_nvd_item(["Exploit"])
+        arr.import_nvd([item])
+        vuln = arr.get(0)
+        assert vuln.has_event_occurred(CVDEvent.X)
+        assert CVDEvent.X in vuln.state.inferred_events
+
+    def test_vendor_advisory_applies_V_with_published_date(self):
+        from vulnstate import CVDArray
+
+        arr = CVDArray()
+        item = self._make_nvd_item(["Vendor Advisory"])
+        arr.import_nvd([item])
+        vuln = arr.get(0)
+        assert vuln.has_event_occurred(CVDEvent.V)
+        # V timestamp should be publishedDate (V <= P)
+        v_ts = vuln.events[CVDEvent.V]
+        p_ts = vuln.events[CVDEvent.P]
+        assert v_ts is not None
+        assert v_ts <= p_ts
+
+    def test_third_party_advisory_applies_V_with_last_modified(self):
+        from vulnstate import CVDArray
+
+        arr = CVDArray()
+        item = self._make_nvd_item(["Third Party Advisory"])
+        arr.import_nvd([item])
+        vuln = arr.get(0)
+        assert vuln.has_event_occurred(CVDEvent.V)
+        # V timestamp should be lastModifiedDate (V > P typically)
+        v_ts = vuln.events[CVDEvent.V]
+        assert v_ts is not None
+
+    def test_vendor_advisory_wins_over_third_party(self):
+        from vulnstate import CVDArray
+
+        arr = CVDArray()
+        item = self._make_nvd_item(["Vendor Advisory", "Third Party Advisory"])
+        arr.import_nvd([item])
+        vuln = arr.get(0)
+        # Vendor Advisory should win — V at publishedDate
+        v_ts = vuln.events[CVDEvent.V]
+        p_ts = vuln.events[CVDEvent.P]
+        assert v_ts == p_ts  # Both use publishedDate
+
+    def test_infer_timestamps_false_gives_none(self):
+        from vulnstate import CVDArray
+
+        arr = CVDArray()
+        item = self._make_nvd_item(["Patch", "Exploit"])
+        arr.import_nvd([item], infer_timestamps=False)
+        vuln = arr.get(0)
+        assert vuln.has_event_occurred(CVDEvent.F)
+        assert vuln.has_event_occurred(CVDEvent.X)
+        assert vuln.events[CVDEvent.F] is None
+        assert vuln.events[CVDEvent.X] is None
+
+    def test_infer_vendor_false_skips_V_from_published(self):
+        from vulnstate import CVDArray
+
+        arr = CVDArray()
+        # No advisory tags, just a basic CVE
+        item = self._make_nvd_item([])
+        arr.import_nvd([item], infer_vendor=False)
+        vuln = arr.get(0)
+        assert not vuln.has_event_occurred(CVDEvent.V)
+        # P should still be set
+        assert vuln.has_event_occurred(CVDEvent.P)
+
+    def test_infer_vendor_true_applies_V_from_published(self):
+        from vulnstate import CVDArray
+
+        arr = CVDArray()
+        item = self._make_nvd_item([])
+        arr.import_nvd([item], infer_vendor=True)  # default
+        vuln = arr.get(0)
+        assert vuln.has_event_occurred(CVDEvent.V)
+        assert CVDEvent.V in vuln.state.inferred_events
+
+    def test_multiple_tags_all_applied(self):
+        from vulnstate import CVDArray
+
+        arr = CVDArray()
+        item = self._make_nvd_item(["Patch", "Exploit", "Vendor Advisory"])
+        arr.import_nvd([item])
+        vuln = arr.get(0)
+        assert vuln.has_event_occurred(CVDEvent.V)
+        assert vuln.has_event_occurred(CVDEvent.F)
+        assert vuln.has_event_occurred(CVDEvent.X)
+        assert vuln.has_event_occurred(CVDEvent.P)
