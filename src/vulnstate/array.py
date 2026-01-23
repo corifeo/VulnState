@@ -1915,6 +1915,147 @@ class CVDArray:
             self, pattern, apply_event, import_metadata, include, exclude, skip_existing
         )
 
+    def infer_events(
+        self,
+        vendor_lead: int = 0,
+        thirdparty_lag: int = 7,
+        deploy: bool = True,
+        deploy_lag: int = 30,
+        severity_adjusted: bool = False,
+        heuristics: bool = True,
+    ) -> dict[str, int]:
+        """
+        Compute event timestamps using configurable offsets and heuristics.
+
+        Tier 1 (always): Refines V timestamps from advisory tags using offsets,
+        infers V from Patch tag, applies D from F + lag.
+        Tier 2 (heuristics=True): CPE/CVSS-based F inference, age-based V.
+
+        All inferred events are flagged with inferred=True. Never overwrites
+        events that are not already flagged as inferred.
+
+        Args:
+            vendor_lead: Days V precedes P for Vendor Advisory tag (default 0)
+            thirdparty_lag: Days V follows P for Third Party Advisory tag (default 7)
+            deploy: Whether to infer D from F + lag (default True)
+            deploy_lag: Flat days between F and D (default 30)
+            severity_adjusted: Use severity-based D lag instead of flat (default False)
+            heuristics: Enable CPE/CVSS/age-based guesses (default True)
+
+        Returns:
+            Summary dict: {"V_inferred": N, "F_inferred": N, "D_inferred": N}
+        """
+        import contextlib
+
+        summary: dict[str, int] = {"V_inferred": 0, "F_inferred": 0, "D_inferred": 0}
+
+        if self._vulnerabilities is None or len(self._vulnerabilities) == 0:
+            return summary
+
+        # Severity-based deploy lag mapping
+        severity_lag_map = {
+            "CRITICAL": 7,
+            "HIGH": 14,
+            "MEDIUM": 30,
+            "LOW": 60,
+        }
+
+        for i in range(len(self)):
+            vuln = self.get(i)
+            metadata = vuln.metadata
+
+            # Get reference tags from stored metadata
+            ref_tags = set(metadata.get("ref_tags", []))
+
+            p_ts = vuln.events.get(CVDEvent.P)
+
+            # --- V inference ---
+            # Only infer if V not set OR was previously inferred (can refine)
+            if not vuln.has_event_occurred(CVDEvent.V) or (
+                CVDEvent.V in vuln.state.inferred_events
+            ):
+                v_ts: Optional[datetime] = None
+
+                if "Vendor Advisory" in ref_tags and p_ts is not None:
+                    v_ts = p_ts - timedelta(days=vendor_lead)
+                elif "Third Party Advisory" in ref_tags and p_ts is not None:
+                    v_ts = p_ts + timedelta(days=thirdparty_lag)
+                elif "Patch" in ref_tags and p_ts is not None:
+                    # Patch implies vendor awareness (at or before P)
+                    v_ts = p_ts - timedelta(days=vendor_lead)
+                elif heuristics and p_ts is not None and metadata.get("has_version_end_excluding"):
+                    # Heuristic: CPE boundary implies vendor awareness
+                    v_ts = p_ts
+
+                if v_ts is not None:
+                    if vuln.has_event_occurred(CVDEvent.V):
+                        # Update timestamp on already-inferred V
+                        vuln.events[CVDEvent.V] = v_ts
+                    else:
+                        vuln.apply_event(CVDEvent.V, timestamp=v_ts, inferred=True)
+                    summary["V_inferred"] += 1
+
+            # --- F inference ---
+            if not vuln.has_event_occurred(CVDEvent.F):
+                f_ts: Optional[datetime] = None
+
+                # Patch tag implies fix exists (use last_modified as proxy)
+                if "Patch" in ref_tags:
+                    last_mod_str = metadata.get("last_modified")
+                    if last_mod_str:
+                        with contextlib.suppress(ValueError, TypeError):
+                            f_ts = datetime.fromisoformat(last_mod_str.replace("Z", "+00:00"))
+
+                # CPE versionEndExcluding implies fix version exists (heuristic)
+                if f_ts is None and heuristics and metadata.get("has_version_end_excluding"):
+                    last_mod_str = metadata.get("last_modified")
+                    if last_mod_str:
+                        with contextlib.suppress(ValueError, TypeError):
+                            f_ts = datetime.fromisoformat(last_mod_str.replace("Z", "+00:00"))
+
+                if f_ts is not None:
+                    # F requires V first - ensure V is set
+                    if not vuln.has_event_occurred(CVDEvent.V) and p_ts is not None:
+                        vuln.apply_event(CVDEvent.V, timestamp=p_ts, inferred=True)
+
+                    with contextlib.suppress(ValueError):
+                        vuln.apply_event(CVDEvent.F, timestamp=f_ts, inferred=True)
+                        summary["F_inferred"] += 1
+
+            # --- D inference ---
+            if (
+                deploy
+                and vuln.has_event_occurred(CVDEvent.F)
+                and not vuln.has_event_occurred(CVDEvent.D)
+            ):
+                f_ts_val = vuln.events.get(CVDEvent.F)
+                if f_ts_val is not None and isinstance(f_ts_val, datetime):
+                    if severity_adjusted:
+                        # Use CVSS score to determine severity tier
+                        cvss = vuln.cvss_score
+                        if cvss is not None:
+                            if cvss >= 9.0:
+                                lag = severity_lag_map["CRITICAL"]
+                            elif cvss >= 7.0:
+                                lag = severity_lag_map["HIGH"]
+                            elif cvss >= 4.0:
+                                lag = severity_lag_map["MEDIUM"]
+                            else:
+                                lag = severity_lag_map["LOW"]
+                        else:
+                            lag = deploy_lag  # Fallback to flat lag
+                    else:
+                        lag = deploy_lag
+
+                    d_ts = f_ts_val + timedelta(days=lag)
+                    with contextlib.suppress(ValueError):
+                        vuln.apply_event(CVDEvent.D, timestamp=d_ts, inferred=True)
+                        summary["D_inferred"] += 1
+
+        # Sync array state
+        self.sync()
+        return summary
+
     def save_pickle_batch(self, filepath: str) -> None:
         """
         Save all vulnerabilities to pickle file (fast).

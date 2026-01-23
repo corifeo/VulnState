@@ -568,6 +568,38 @@ class NVDParser:
             with contextlib.suppress(ValueError):
                 vuln.apply_event(CVDEvent.X, timestamp=x_ts, inferred=True)
 
+        # Check for versionEndExcluding in configurations (fix version boundary)
+        has_version_end = False
+        configurations = item.get("configurations", {})
+        if isinstance(configurations, dict):
+            for node in configurations.get("nodes", []):
+                for match in node.get("cpe_match", []):
+                    if "versionEndExcluding" in match:
+                        has_version_end = True
+                        break
+                if has_version_end:
+                    break
+                # Also check children nodes
+                for child in node.get("children", []):
+                    for match in child.get("cpe_match", []):
+                        if "versionEndExcluding" in match:
+                            has_version_end = True
+                            break
+                    if has_version_end:
+                        break
+        elif isinstance(configurations, list):
+            # NVD 2.0 format
+            for config in configurations:
+                for node in config.get("nodes", []):
+                    for match in node.get("cpeMatch", []):
+                        if "versionEndExcluding" in match:
+                            has_version_end = True
+                            break
+                    if has_version_end:
+                        break
+        if has_version_end:
+            vuln.metadata["has_version_end_excluding"] = True
+
         return vuln
 
     @staticmethod
