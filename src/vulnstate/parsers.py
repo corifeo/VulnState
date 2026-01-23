@@ -404,6 +404,35 @@ class NVDParser:
             return item.get("lastModifiedDate")
 
     @staticmethod
+    def extract_reference_tags(item: dict[str, Any], format_version: str) -> set[str]:
+        """
+        Extract all unique reference tags from NVD item.
+
+        Scans all references and collects their tags into a flat set.
+        Common tags: "Patch", "Exploit", "Vendor Advisory", "Third Party Advisory",
+        "Mitigation", "US Government Resource".
+
+        Args:
+            item: NVD vulnerability item
+            format_version: "1.1" or "2.0"
+
+        Returns:
+            Set of tag strings (may be empty)
+        """
+        tags: set[str] = set()
+
+        if format_version == "2.0":
+            references = item.get("cve", {}).get("references", [])
+            for ref in references:
+                tags.update(ref.get("tags", []))
+        else:
+            ref_data = item.get("cve", {}).get("references", {}).get("reference_data", [])
+            for ref in ref_data:
+                tags.update(ref.get("tags", []))
+
+        return tags
+
+    @staticmethod
     def create_vuln_from_item(
         cve_id: str, item: dict[str, Any], format_version: str = "1.1"
     ) -> "CVDVulnerability":
