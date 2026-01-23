@@ -39,6 +39,32 @@ class TestInferredEventFlag:
         assert CVDEvent.V not in vuln.state.inferred_events
 
 
+class TestInferredEventSerialization:
+    """Inferred flag survives serialization round-trip."""
+
+    def test_to_dict_includes_inferred(self):
+        vuln = CVDVulnerability("CVE-2023-0001")
+        vuln.apply_event(CVDEvent.P, timestamp=datetime(2023, 1, 1))
+        vuln.apply_event(CVDEvent.V, timestamp=datetime(2023, 1, 1), inferred=True)
+        vuln.apply_event(CVDEvent.F, timestamp=datetime(2023, 6, 1), inferred=True)
+        data = vuln.to_dict()
+        assert "inferred_events" in data
+        assert "F" in data["inferred_events"]
+        assert "V" in data["inferred_events"]
+        assert "P" not in data["inferred_events"]
+
+    def test_from_dict_restores_inferred(self):
+        vuln = CVDVulnerability("CVE-2023-0001")
+        vuln.apply_event(CVDEvent.P, timestamp=datetime(2023, 1, 1))
+        vuln.apply_event(CVDEvent.V, timestamp=datetime(2023, 1, 1), inferred=True)
+        vuln.apply_event(CVDEvent.F, timestamp=datetime(2023, 6, 1), inferred=True)
+        data = vuln.to_dict()
+        restored = CVDVulnerability.from_dict(data)
+        assert CVDEvent.F in restored.state.inferred_events
+        assert CVDEvent.V in restored.state.inferred_events
+        assert CVDEvent.P not in restored.state.inferred_events
+
+
 class TestExtractReferenceTags:
     """NVDParser extracts reference tags from NVD items."""
 

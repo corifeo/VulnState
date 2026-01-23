@@ -720,6 +720,9 @@ class CVDIO:
             ],
         }
 
+        # Inferred events
+        data["inferred_events"] = [e.name for e in vuln.state.inferred_events]
+
         if include_computed:
             data["state_label"] = vuln.state_label
             data["history_string"] = vuln.history_string
@@ -789,6 +792,11 @@ class CVDIO:
             events=events,
             history=history,
         )
+
+        # Restore inferred events
+        inferred_names = data.get("inferred_events", [])
+        vuln.state.inferred_events = {CVDEvent[name] for name in inferred_names}
+
         vuln.metadata = data.get("metadata", {})
 
         return vuln
