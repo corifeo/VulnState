@@ -2220,6 +2220,7 @@ class CVDArray:
             include,
             exclude,
         )
+        self.sync()
 
     def import_json(
         self,
