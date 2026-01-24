@@ -1847,6 +1847,7 @@ class CVDArray:
         skip_existing: bool = False,
         infer_vendor: bool = True,
         infer_timestamps: bool = True,
+        include_rejected: bool = False,
     ) -> None:
         """
         Import NVD vulnerability data.
@@ -1860,6 +1861,7 @@ class CVDArray:
             skip_existing: Skip CVEs already in array (default: False)
             infer_vendor: Infer V event from publishedDate (default: True)
             infer_timestamps: Use proxy timestamps for inferred events (default: True)
+            include_rejected: Include rejected CVEs in import (default: False)
 
         Example:
             >>> arr = CVDArray()
@@ -1879,6 +1881,7 @@ class CVDArray:
             skip_existing,
             infer_vendor=infer_vendor,
             infer_timestamps=infer_timestamps,
+            include_rejected=include_rejected,
         )
 
     def import_nvd_glob(

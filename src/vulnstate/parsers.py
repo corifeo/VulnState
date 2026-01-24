@@ -256,6 +256,41 @@ class NVDParser:
         return result
 
     @staticmethod
+    def detect_cve_status(item: dict[str, Any], format_version: str) -> str:
+        """
+        Detect CVE lifecycle status from NVD item.
+
+        Checks vulnStatus field (NVD 2.0) and description markers (both formats)
+        for rejection, dispute, or reservation indicators.
+
+        Args:
+            item: NVD vulnerability item
+            format_version: "1.1" or "2.0"
+
+        Returns:
+            One of: "rejected", "disputed", "reserved", "active"
+        """
+        # NVD 2.0: check vulnStatus field
+        if format_version == "2.0":
+            vuln_status = item.get("cve", {}).get("vulnStatus", "")
+            if vuln_status == "Rejected":
+                return "rejected"
+
+        # Check description markers (both formats)
+        description = NVDParser.extract_description(item, format_version)
+        if not description:
+            return "reserved"
+
+        if "** REJECT **" in description or description.startswith("Rejected reason:"):
+            return "rejected"
+        if "** DISPUTED **" in description:
+            return "disputed"
+        if "** RESERVED **" in description:
+            return "reserved"
+
+        return "active"
+
+    @staticmethod
     def extract_published_date(item: dict[str, Any], format_version: str) -> Optional[str]:
         """
         Extract published date from NVD item based on format version.
@@ -486,6 +521,10 @@ class NVDParser:
         if cpe_strings:
             vuln.metadata["cpe_strings"] = cpe_strings
 
+        # Detect and store CVE status
+        cve_status = NVDParser.detect_cve_status(item, format_version)
+        vuln.metadata["cve_status"] = cve_status
+
         # Extract description
         description = NVDParser.extract_description(item, format_version)
         if description:
@@ -613,6 +652,7 @@ class NVDParser:
         skip_existing: bool = False,
         infer_vendor: bool = True,
         infer_timestamps: bool = True,
+        include_rejected: bool = False,
     ) -> None:
         """
         Import NVD vulnerability data (supports both 1.1 and 2.0 formats).
@@ -627,6 +667,7 @@ class NVDParser:
             skip_existing: Skip CVEs already in array (default False)
             infer_vendor: Infer V event from publishedDate (default True)
             infer_timestamps: Use proxy timestamps for inferred events (default True)
+            include_rejected: Include rejected CVEs in import (default False)
 
         Note:
             Automatically detects NVD format version (1.1 or 2.0) and parses accordingly.
@@ -691,6 +732,12 @@ class NVDParser:
                 if not cve_id:
                     continue
 
+                # Skip rejected CVEs unless explicitly included
+                if not include_rejected:
+                    cve_status = NVDParser.detect_cve_status(item, format_version)
+                    if cve_status == "rejected":
+                        continue
+
                 vuln = NVDParser.create_vuln_from_item(
                     cve_id,
                     item,
@@ -736,6 +783,12 @@ class NVDParser:
             cve_id = NVDParser.extract_cve_id(item, format_version)
             if not cve_id:
                 continue
+
+            # Skip rejected CVEs unless explicitly included
+            if not include_rejected:
+                cve_status = NVDParser.detect_cve_status(item, format_version)
+                if cve_status == "rejected":
+                    continue
 
             if cve_id in existing_cves:
                 if skip_existing:

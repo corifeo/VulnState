@@ -479,6 +479,7 @@ class CVDIO:
         skip_existing: bool = False,
         infer_vendor: bool = True,
         infer_timestamps: bool = True,
+        include_rejected: bool = False,
     ) -> None:
         """Import NVD data (delegates to NVDParser)."""
         from .parsers import NVDParser
@@ -493,6 +494,7 @@ class CVDIO:
             skip_existing,
             infer_vendor=infer_vendor,
             infer_timestamps=infer_timestamps,
+            include_rejected=include_rejected,
         )
 
     @staticmethod

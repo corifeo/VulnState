@@ -239,3 +239,189 @@ class TestTagEventDetection:
         assert vuln.has_event_occurred(CVDEvent.F)
         assert vuln.has_event_occurred(CVDEvent.X)
         assert vuln.has_event_occurred(CVDEvent.P)
+
+
+class TestCVEStatusDetection:
+    """NVDParser detects rejected/disputed/reserved CVEs."""
+
+    def test_detect_rejected_from_description(self):
+        item = {
+            "cve": {
+                "CVE_data_meta": {"ID": "CVE-2023-0001"},
+                "description": {
+                    "description_data": [
+                        {
+                            "lang": "en",
+                            "value": "Rejected reason: DO NOT USE THIS CANDIDATE NUMBER.",
+                        }
+                    ]
+                },
+            }
+        }
+        assert NVDParser.detect_cve_status(item, "1.1") == "rejected"
+
+    def test_detect_rejected_marker(self):
+        item = {
+            "cve": {
+                "CVE_data_meta": {"ID": "CVE-2023-0001"},
+                "description": {
+                    "description_data": [
+                        {"lang": "en", "value": "** REJECT ** This is a duplicate."}
+                    ]
+                },
+            }
+        }
+        assert NVDParser.detect_cve_status(item, "1.1") == "rejected"
+
+    def test_detect_disputed(self):
+        item = {
+            "cve": {
+                "CVE_data_meta": {"ID": "CVE-2023-0001"},
+                "description": {
+                    "description_data": [
+                        {
+                            "lang": "en",
+                            "value": "** DISPUTED ** Some vulnerability description.",
+                        }
+                    ]
+                },
+            }
+        }
+        assert NVDParser.detect_cve_status(item, "1.1") == "disputed"
+
+    def test_detect_active(self):
+        item = {
+            "cve": {
+                "CVE_data_meta": {"ID": "CVE-2023-0001"},
+                "description": {
+                    "description_data": [{"lang": "en", "value": "A buffer overflow in product X."}]
+                },
+            }
+        }
+        assert NVDParser.detect_cve_status(item, "1.1") == "active"
+
+    def test_detect_rejected_v20(self):
+        item = {
+            "cve": {
+                "id": "CVE-2023-0001",
+                "vulnStatus": "Rejected",
+                "descriptions": [{"lang": "en", "value": "Some rejected CVE."}],
+            }
+        }
+        assert NVDParser.detect_cve_status(item, "2.0") == "rejected"
+
+    def test_detect_reserved(self):
+        item = {
+            "cve": {
+                "CVE_data_meta": {"ID": "CVE-2023-0001"},
+                "description": {
+                    "description_data": [
+                        {
+                            "lang": "en",
+                            "value": "** RESERVED ** This candidate has been reserved.",
+                        }
+                    ]
+                },
+            }
+        }
+        assert NVDParser.detect_cve_status(item, "1.1") == "reserved"
+
+    def test_detect_reserved_empty_description(self):
+        item = {
+            "cve": {
+                "CVE_data_meta": {"ID": "CVE-2023-0001"},
+                "description": {"description_data": []},
+            }
+        }
+        assert NVDParser.detect_cve_status(item, "1.1") == "reserved"
+
+    def test_import_skips_rejected_by_default(self):
+        from vulnstate import CVDArray
+
+        items = [
+            {
+                "cve": {
+                    "CVE_data_meta": {"ID": "CVE-2023-0001"},
+                    "description": {
+                        "description_data": [{"lang": "en", "value": "Valid vulnerability."}]
+                    },
+                    "references": {"reference_data": []},
+                },
+                "publishedDate": "2023-01-15T00:00Z",
+                "lastModifiedDate": "2023-06-15T00:00Z",
+                "impact": {},
+                "configurations": {"nodes": []},
+            },
+            {
+                "cve": {
+                    "CVE_data_meta": {"ID": "CVE-2023-0002"},
+                    "description": {
+                        "description_data": [{"lang": "en", "value": "Rejected reason: Duplicate."}]
+                    },
+                    "references": {"reference_data": []},
+                },
+                "publishedDate": "2023-01-15T00:00Z",
+                "lastModifiedDate": "2023-06-15T00:00Z",
+                "impact": {},
+                "configurations": {"nodes": []},
+            },
+        ]
+        arr = CVDArray()
+        arr.import_nvd(items)
+        assert len(arr) == 1  # Only active CVE imported
+
+    def test_import_includes_rejected_when_flag_set(self):
+        from vulnstate import CVDArray
+
+        items = [
+            {
+                "cve": {
+                    "CVE_data_meta": {"ID": "CVE-2023-0001"},
+                    "description": {"description_data": [{"lang": "en", "value": "Valid."}]},
+                    "references": {"reference_data": []},
+                },
+                "publishedDate": "2023-01-15T00:00Z",
+                "lastModifiedDate": "2023-06-15T00:00Z",
+                "impact": {},
+                "configurations": {"nodes": []},
+            },
+            {
+                "cve": {
+                    "CVE_data_meta": {"ID": "CVE-2023-0002"},
+                    "description": {
+                        "description_data": [{"lang": "en", "value": "Rejected reason: Duplicate."}]
+                    },
+                    "references": {"reference_data": []},
+                },
+                "publishedDate": "2023-01-15T00:00Z",
+                "lastModifiedDate": "2023-06-15T00:00Z",
+                "impact": {},
+                "configurations": {"nodes": []},
+            },
+        ]
+        arr = CVDArray()
+        arr.import_nvd(items, include_rejected=True)
+        assert len(arr) == 2  # Both imported
+
+    def test_status_stored_in_metadata(self):
+        from vulnstate import CVDArray
+
+        items = [
+            {
+                "cve": {
+                    "CVE_data_meta": {"ID": "CVE-2023-0001"},
+                    "description": {
+                        "description_data": [{"lang": "en", "value": "** DISPUTED ** Something."}]
+                    },
+                    "references": {"reference_data": []},
+                },
+                "publishedDate": "2023-01-15T00:00Z",
+                "lastModifiedDate": "2023-06-15T00:00Z",
+                "impact": {},
+                "configurations": {"nodes": []},
+            }
+        ]
+        arr = CVDArray()
+        arr.import_nvd(items)
+        vuln = arr.get(0)
+        assert vuln.metadata["cve_status"] == "disputed"
