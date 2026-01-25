@@ -12,48 +12,23 @@ Topics:
 - DataFrame conversion for analysis
 """
 
-import random
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from vulnstate import CVDArray, CVDEvent, CVDVulnerability
+from vulnstate import CVDArray, CVDEvent
 
 console = Console()
 
 
 def create_sample_dataset(size: int) -> CVDArray:
-    """Create a sample vulnerability dataset."""
-    vulns = []
-    vendors = ["Apache", "Microsoft", "Apple", "Linux", "OpenSSL", "Nginx"]
-    severities = ["low", "medium", "high", "critical"]
-
-    for i in range(size):
-        v = CVDVulnerability(
-            f"CVE-2024-{i:05d}",
-            vendor=vendors[i % len(vendors)],
-            severity=severities[i % len(severities)],
-            cvss_score=round(random.uniform(3.0, 10.0), 1),
-        )
-
-        # Apply events with realistic distribution
-        base = datetime(2024, 1, 1) + timedelta(days=i % 180)
-        v.apply_event(CVDEvent.V, timestamp=base)
-
-        if random.random() < 0.7:  # 70% get F
-            v.apply_event(CVDEvent.F, timestamp=base + timedelta(days=random.randint(5, 30)))
-
-        if random.random() < 0.4:  # 40% get D
-            v.apply_event(CVDEvent.D, timestamp=base + timedelta(days=random.randint(20, 60)))
-
-        if random.random() < 0.5:  # 50% get P
-            v.apply_event(CVDEvent.P, timestamp=base + timedelta(days=random.randint(1, 45)))
-
-        vulns.append(v)
-
-    return CVDArray(vulns)
+    """Create a sample vulnerability dataset using CVDArray.generate()."""
+    return CVDArray.generate(
+        size,
+        vendors=["Apache", "Microsoft", "Apple", "Linux", "OpenSSL", "Nginx"],
+    )
 
 
 def section_1_creating_arrays():
@@ -183,37 +158,28 @@ def section_3b_dimension_analysis():
     arr = create_sample_dataset(5000)
 
     console.print("[bold]FixPath Distribution:[/bold]")
-    console.print("[magenta].fix_path -> np.ndarray[FixPath][/magenta]")
+    console.print("[magenta].count_by_fix_path() -> Dict[FixPath, int][/magenta]")
     console.print()
 
-    # Count by fix path
-    remediated_count = (arr.fix_path == FixPath.REMEDIATED).sum()
-    fix_ready_count = (arr.fix_path == FixPath.FIX_READY).sum()
-    no_fix_count = (arr.fix_path == FixPath.NO_AWARENESS).sum()
-
-    console.print(
-        f"  Remediated (VFD): {remediated_count:,} ({remediated_count/len(arr)*100:.1f}%)"
-    )
-    console.print(f"  Fix Ready (VFd):  {fix_ready_count:,} ({fix_ready_count/len(arr)*100:.1f}%)")
-    console.print(f"  No Fix (v):       {no_fix_count:,} ({no_fix_count/len(arr)*100:.1f}%)")
+    # Count by fix path using convenience method
+    fix_counts = arr.count_by_fix_path()
+    for fp in [FixPath.NO_AWARENESS, FixPath.VENDOR_AWARE, FixPath.FIX_READY, FixPath.REMEDIATED]:
+        count = fix_counts.get(fp, 0)
+        pct = count / len(arr) * 100
+        console.print(f"  {fp.label:.<20} {count:>5,} ({pct:>5.1f}%)")
     console.print()
 
     console.print("[bold]ThreatState Distribution:[/bold]")
-    console.print("[magenta].threat_state -> np.ndarray[ThreatState][/magenta]")
+    console.print("[magenta].count_by_threat_state() -> Dict[ThreatState, int][/magenta]")
     console.print()
 
-    # Count by threat state
-    attacked_count = (arr.threat_state == ThreatState.ACTIVE_THREAT).sum()
-    weaponized_count = (arr.threat_state == ThreatState.WEAPONIZED).sum()
-    public_count = (arr.threat_state == ThreatState.DISCLOSED).sum()
-    private_count = (arr.threat_state == ThreatState.LATENT).sum()
-
-    console.print(f"  Attacked (PXA):   {attacked_count:,} ({attacked_count/len(arr)*100:.1f}%)")
-    console.print(
-        f"  Weaponized (PX):  {weaponized_count:,} ({weaponized_count/len(arr)*100:.1f}%)"
-    )
-    console.print(f"  Public (P):       {public_count:,} ({public_count/len(arr)*100:.1f}%)")
-    console.print(f"  Private (p):      {private_count:,} ({private_count/len(arr)*100:.1f}%)")
+    # Count by threat state using convenience method
+    threat_counts = arr.count_by_threat_state()
+    for ts in ThreatState:
+        count = threat_counts.get(ts, 0)
+        if count > 0:
+            pct = count / len(arr) * 100
+            console.print(f"  {ts.label:.<20} {count:>5,} ({pct:>5.1f}%)")
     console.print()
 
     console.print("[bold]Risk Filtering by Dimension:[/bold]")

@@ -13,80 +13,29 @@ Topics:
 Note: This example uses pandas for DataFrame operations.
 """
 
-import random
-from datetime import datetime, timedelta
-
-import pandas as pd
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from vulnstate import CVDArray, CVDEvent, CVDVulnerability
-
-
-def arr_to_dataframe(arr: CVDArray) -> pd.DataFrame:
-    """Convert CVDArray to pandas DataFrame for analysis."""
-    records = []
-    for i in range(len(arr)):
-        vuln = arr.get(i)
-        record = {
-            "vuln_id": vuln.vuln_id,
-            "cve_id": vuln.cve_id,
-            "state": vuln.state,
-            "severity": vuln.metadata.get("severity"),
-            "vendor": vuln.metadata.get("vendor"),
-            "cvss_score": vuln.cvss_score,
-            "V": 1 if vuln.has_event_occurred(CVDEvent.V) else 0,
-            "F": 1 if vuln.has_event_occurred(CVDEvent.F) else 0,
-            "D": 1 if vuln.has_event_occurred(CVDEvent.D) else 0,
-            "P": 1 if vuln.has_event_occurred(CVDEvent.P) else 0,
-            "X": 1 if vuln.has_event_occurred(CVDEvent.X) else 0,
-            "A": 1 if vuln.has_event_occurred(CVDEvent.A) else 0,
-        }
-        records.append(record)
-    return pd.DataFrame(records)
-
+from vulnstate import CVDArray, CVDEvent
 
 console = Console()
 
 
 def create_sample_dataset(size: int = 500) -> CVDArray:
-    """Create sample vulnerability dataset."""
-    vuln_list = []
-    vendors = ["Apache", "Microsoft", "Apple", "Linux", "OpenSSL", "Nginx"]
-    severities = ["low", "medium", "high", "critical"]
-    base_date = datetime(2024, 1, 1)
-
-    for i in range(size):
-        vuln = CVDVulnerability(
-            f"CVE-2024-{i:05d}",
-            vendor=vendors[i % len(vendors)],
-            severity=severities[i % len(severities)],
-            cvss_score=round(random.uniform(3.0, 10.0), 1),
-        )
-
-        # Apply events with realistic timing
-        v_time = base_date + timedelta(days=random.randint(0, 180))
-        vuln.apply_event(CVDEvent.V, timestamp=v_time)
-
-        if random.random() < 0.7:
-            vuln.apply_event(CVDEvent.F, timestamp=v_time + timedelta(days=random.randint(5, 30)))
-
-        if random.random() < 0.4:
-            vuln.apply_event(CVDEvent.D, timestamp=v_time + timedelta(days=random.randint(20, 60)))
-
-        if random.random() < 0.5:
-            vuln.apply_event(CVDEvent.P, timestamp=v_time + timedelta(days=random.randint(1, 45)))
-
-        if random.random() < 0.1:  # 10% have exploits
-            vuln.apply_event(CVDEvent.X, timestamp=v_time + timedelta(days=random.randint(0, 30)))
-
-        if random.random() < 0.05:  # 5% under attack
-            vuln.apply_event(CVDEvent.A, timestamp=v_time + timedelta(days=random.randint(5, 45)))
-
-        vuln_list.append(vuln)
-
-    return CVDArray(vuln_list)
+    """Create sample vulnerability dataset using CVDArray.generate()."""
+    return CVDArray.generate(
+        size,
+        event_probs={
+            CVDEvent.V: 1.0,
+            CVDEvent.F: 0.7,
+            CVDEvent.D: 0.4,
+            CVDEvent.P: 0.5,
+            CVDEvent.X: 0.1,
+            CVDEvent.A: 0.05,
+        },
+        vendors=["Apache", "Microsoft", "Apple", "Linux", "OpenSSL", "Nginx"],
+    )
 
 
 def section_1_portfolio_overview():
@@ -96,7 +45,7 @@ def section_1_portfolio_overview():
     )
 
     arr = create_sample_dataset(500)
-    df = arr_to_dataframe(arr)
+    df = arr.to_dataframe(include_events=True)
     console.print(f"[yellow]Analyzing portfolio of {len(arr)} vulnerabilities...[/yellow]\n")
 
     # CVSS Statistics
@@ -109,9 +58,15 @@ def section_1_portfolio_overview():
     console.print(f"  Range:  {cvss_stats['min']:.1f} - {cvss_stats['max']:.1f}")
     console.print()
 
-    # Severity distribution
-    console.print("[bold]Severity Distribution:[/bold]")
-    console.print("[magenta]DataFrame column: severity[/magenta]")
+    # Severity distribution (derived from CVSS score)
+    import pandas as pd
+
+    console.print("[bold]Severity Distribution (from CVSS):[/bold]")
+    df["severity"] = pd.cut(
+        df["cvss_score"],
+        bins=[0, 4.0, 7.0, 9.0, 10.0],
+        labels=["low", "medium", "high", "critical"],
+    )
     severity_counts = df["severity"].value_counts()
     for severity in ["critical", "high", "medium", "low"]:
         count = severity_counts.get(severity, 0)
@@ -199,7 +154,7 @@ def section_2_risk_tiers():
     console.print(Panel.fit("[bold cyan]Section 2: Risk Tiers[/bold cyan]", border_style="cyan"))
 
     arr = create_sample_dataset(500)
-    df = arr_to_dataframe(arr)
+    df = arr.to_dataframe(include_events=True)
     console.print("[yellow]Classifying vulnerabilities into risk tiers...[/yellow]\n")
 
     console.print("[bold]Risk Classification Logic:[/bold]")
@@ -243,7 +198,7 @@ def section_2_risk_tiers():
     # Priority actions
     console.print("[bold]Recommended Actions:[/bold]")
     critical_count = critical_mask.sum()
-    unpatched_critical = len(df[(df["severity"] == "critical") & (df["F"] == 0)])
+    unpatched_critical = len(df[(df["cvss_score"] >= 9.0) & (df["F"] == 0)])
     public_unpatched = len(df[(df["P"] == 1) & (df["F"] == 0)])
 
     console.print(f"  1. [red]Emergency response:[/red] {critical_count} critical exploited vulns")
@@ -259,7 +214,7 @@ def section_3_vendor_analysis():
     )
 
     arr = create_sample_dataset(500)
-    df = arr_to_dataframe(arr)
+    df = arr.to_dataframe(include_events=True)
     console.print("[yellow]Analyzing vulnerabilities by vendor...[/yellow]\n")
 
     console.print("[bold]Vendor Portfolio:[/bold]")
@@ -277,7 +232,7 @@ def section_3_vendor_analysis():
         vendor_data = df[df["vendor"] == vendor]
         count = len(vendor_data)
         avg_cvss = vendor_data["cvss_score"].mean()
-        critical_pct = (vendor_data["severity"] == "critical").sum() / count * 100
+        critical_pct = (vendor_data["cvss_score"] >= 9.0).sum() / count * 100
         patched_pct = vendor_data["F"].sum() / count * 100
 
         table.add_row(
@@ -292,7 +247,7 @@ def section_3_vendor_analysis():
     for vendor in df["vendor"].unique():
         vendor_data = df[df["vendor"] == vendor]
         unpatched_critical = len(
-            vendor_data[(vendor_data["severity"] == "critical") & (vendor_data["F"] == 0)]
+            vendor_data[(vendor_data["cvss_score"] >= 9.0) & (vendor_data["F"] == 0)]
         )
         if unpatched_critical > 0:
             console.print(f"  {vendor}: {unpatched_critical} unpatched critical")
@@ -309,7 +264,7 @@ def section_4_export_for_reporting():
     console.print("[bold magenta]Export Methods:[/bold magenta]")
     console.print("[magenta].to_dict_batch() -> List[Dict][/magenta]")
     console.print("[magenta].to_json_batch(path) -> None[/magenta]")
-    console.print("[magenta]arr_to_dataframe(arr) -> pd.DataFrame[/magenta]")
+    console.print("[magenta]arr.to_dataframe(include_events=True) -> pd.DataFrame[/magenta]")
     console.print()
 
     # Dict batch export
@@ -320,7 +275,7 @@ def section_4_export_for_reporting():
 
     # DataFrame for analysis
     console.print("[bold]DataFrame Export Sample:[/bold]")
-    df = arr_to_dataframe(arr)
+    df = arr.to_dataframe(include_events=True)
     sample_cols = ["vuln_id", "state", "severity", "cvss_score", "vendor"]
     available = [c for c in sample_cols if c in df.columns]
     console.print(df[available].head(5).to_string())
