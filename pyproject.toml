@@ -79,6 +79,13 @@ python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"
 addopts = "-v --tb=short"
+markers = [
+    "unit: Unit tests for individual components",
+    "integration: Integration tests spanning multiple components",
+    "performance: Performance and benchmark tests",
+    "regression: Regression tests for specific bugs",
+    "slow: Tests that take significant time to run",
+]
 
 [tool.mypy]
 python_version = "3.9"

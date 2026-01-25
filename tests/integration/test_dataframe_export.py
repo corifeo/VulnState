@@ -8,8 +8,11 @@ consistent derived values. Verifies analytics across different access patterns.
 from datetime import datetime, timedelta
 
 import numpy as np
+import pytest
 
 from vulnstate import VALID_HISTORIES, CVDArray, CVDEvent, CVDVulnerability
+
+pytestmark = pytest.mark.integration
 
 
 def create_vuln(history: str) -> CVDVulnerability:

@@ -7,7 +7,11 @@ Uses all 70 valid histories but tests aggregate correctness, not individual para
 
 from datetime import datetime, timedelta
 
+import pytest
+
 from vulnstate import VALID_HISTORIES, CVDArray, CVDEvent, CVDVulnerability
+
+pytestmark = pytest.mark.integration
 
 
 def create_vuln(history: str) -> CVDVulnerability:

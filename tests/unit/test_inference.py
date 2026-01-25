@@ -2,7 +2,11 @@
 
 from datetime import datetime, timedelta
 
+import pytest
+
 from vulnstate import CVDArray, CVDEvent, CVDVulnerability
+
+pytestmark = pytest.mark.unit
 
 
 def _make_vuln_with_tags(cve_id, tags, published="2023-01-15", last_modified="2023-06-15"):

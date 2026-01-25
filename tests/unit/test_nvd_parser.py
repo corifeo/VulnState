@@ -20,6 +20,8 @@ from vulnstate.constants import CVDEvent
 from vulnstate.io import CVDIO
 from vulnstate.parsers import NVDParser
 
+pytestmark = pytest.mark.unit
+
 
 class TestNVDFormatDetection:
     """Test automatic format detection."""

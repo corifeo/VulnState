@@ -2,8 +2,12 @@
 
 from datetime import datetime
 
+import pytest
+
 from vulnstate import CVDEvent, CVDVulnerability
 from vulnstate.parsers import NVDParser
+
+pytestmark = pytest.mark.unit
 
 
 class TestInferredEventFlag:

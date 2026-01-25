@@ -13,6 +13,8 @@ import pytest
 from vulnstate import CVDArray
 from vulnstate.parsers import NVDParser
 
+pytestmark = pytest.mark.integration
+
 
 class TestCompleteWorkflow:
     """End-to-end workflow tests."""

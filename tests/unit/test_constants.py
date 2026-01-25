@@ -13,6 +13,10 @@ Tests for constants.py module containing CVD paper concepts:
 - ORDERED_PAIRS_TABLE (Table 3.3 from SEI/CMU 2021 paper)
 """
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 
 def test_event_pair_relation_enum():
     """Test EventPairRelation from Table 3.3 of paper."""

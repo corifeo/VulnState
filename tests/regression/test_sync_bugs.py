@@ -11,6 +11,8 @@ import pytest
 
 from vulnstate import CVDArray, CVDVulnerability
 
+pytestmark = pytest.mark.regression
+
 
 class TestEpssSyncRegression:
     """Guard against EPSS not syncing from vuln objects to array properties."""

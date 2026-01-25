@@ -8,7 +8,6 @@ and enrichment operations for both single vulnerabilities and batch arrays.
 import json
 import os
 import tempfile
-import time
 from datetime import datetime
 from pathlib import Path
 
@@ -17,6 +16,8 @@ import pytest
 
 from vulnstate import CVDArray, CVDEvent, CVDVulnerability
 from vulnstate.io import CVDIO
+
+pytestmark = pytest.mark.integration
 
 
 class TestCVDIO:

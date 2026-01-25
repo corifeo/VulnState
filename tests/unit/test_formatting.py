@@ -13,6 +13,8 @@ from vulnstate import CVDEvent, CVDVulnerability
 from vulnstate.array import CVDArray
 from vulnstate.formatting import CVDFormatter
 
+pytestmark = pytest.mark.unit
+
 
 class TestFormatVulnerability:
     """Tests for format_vulnerability method."""

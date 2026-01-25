@@ -1,6 +1,10 @@
 """Tests for CVSS vector parsing."""
 
+import pytest
+
 from vulnstate.parsers import NVDParser
+
+pytestmark = pytest.mark.unit
 
 
 def test_parse_cvss_vector_valid():

@@ -10,6 +10,8 @@ import pytest
 from vulnstate import CVDArray, CVDEvent, CVDVulnerability
 from vulnstate.constants import get_state_label
 
+pytestmark = pytest.mark.unit
+
 
 class TestEPSSValidation:
     """Tests for EPSS score validation."""

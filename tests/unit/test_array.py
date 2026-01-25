@@ -9,6 +9,8 @@ from vulnstate import CVDEvent
 from vulnstate.array import CVDArray
 from vulnstate.vulnerability import CVDVulnerability
 
+pytestmark = pytest.mark.unit
+
 
 class TestBatchCreation:
     """Test CVDArray creation."""

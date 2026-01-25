@@ -11,8 +11,11 @@ Tests for data integrity issues specific to a data import/manipulation library:
 from datetime import datetime
 
 import numpy as np
+import pytest
 
 from vulnstate import CVDArray, CVDEvent, CVDVulnerability
+
+pytestmark = pytest.mark.integration
 
 
 class TestSlicingBehavior:

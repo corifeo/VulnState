@@ -10,10 +10,11 @@ Run all:  uv run pytest tests/performance/ -v --run-slow
 
 import time
 
-import numpy as np
 import pytest
 
 from vulnstate import CVDArray, CVDEvent, CVDVulnerability
+
+pytestmark = pytest.mark.performance
 
 
 # =============================================================================

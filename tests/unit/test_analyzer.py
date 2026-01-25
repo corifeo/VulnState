@@ -4,9 +4,12 @@ Tests for CVDAnalyzer - Vectorized analytics computation.
 """
 
 import numpy as np
+import pytest
 
 from vulnstate import CVDArray, CVDVulnerability
 from vulnstate.constants import CVDEvent
+
+pytestmark = pytest.mark.unit
 
 
 def test_analyzer_init():

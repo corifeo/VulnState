@@ -1,6 +1,9 @@
 """Tests for models.py dataclasses."""
 
 import numpy as np
+import pytest
+
+pytestmark = pytest.mark.unit
 
 
 class TestEventMetadata:
