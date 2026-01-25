@@ -118,3 +118,6 @@ docs/plans/_archive/CLEANUP-SUMMARY.md
 
 # Renamify workspace
 .renamify/
+
+# Git worktrees
+.worktrees/
