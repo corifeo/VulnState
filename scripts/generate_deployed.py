@@ -6,9 +6,9 @@ offset (7-90 days from lastModifiedDate). Deterministic with seed=42.
 
 import csv
 import random
+import sys
 from datetime import datetime, timedelta
 
-import sys
 sys.path.insert(0, "src")
 
 from vulnstate.parsers import NVDParser, _load_json
