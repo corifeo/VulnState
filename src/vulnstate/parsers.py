@@ -525,6 +525,12 @@ class NVDParser:
         cve_status = NVDParser.detect_cve_status(item, format_version)
         vuln.metadata["cve_status"] = cve_status
 
+        # Store raw vulnStatus from NVD 2.0 (for analysis tracking)
+        if format_version == "2.0":
+            raw_vuln_status = item.get("cve", {}).get("vulnStatus")
+            if raw_vuln_status:
+                vuln.metadata["nvd_status"] = raw_vuln_status
+
         # Extract description
         description = NVDParser.extract_description(item, format_version)
         if description:
@@ -680,14 +686,27 @@ class NVDParser:
             local_path = CVDIO._resolve_source(source)
             nvd_feed = _load_json(local_path)
 
-            # Detect format version
-            format_version = NVDParser.detect_format(nvd_feed)
-
-            # Extract items based on format
-            if format_version == "2.0":
-                nvd_items = nvd_feed.get("vulnerabilities", [])
+            # Handle case where file contains a plain JSON array (e.g., nvd.handsonhacking.org)
+            if isinstance(nvd_feed, list):
+                nvd_items = nvd_feed
+                # Detect format from first item
+                if nvd_items:
+                    first_item = nvd_items[0]
+                    if "cve" in first_item and "id" in first_item.get("cve", {}):
+                        format_version = "2.0"
+                    else:
+                        format_version = "1.1"
+                else:
+                    format_version = "1.1"
             else:
-                nvd_items = nvd_feed.get("CVE_Items", [])
+                # Standard NVD feed with wrapper object
+                format_version = NVDParser.detect_format(nvd_feed)
+
+                # Extract items based on format
+                if format_version == "2.0":
+                    nvd_items = nvd_feed.get("vulnerabilities", [])
+                else:
+                    nvd_items = nvd_feed.get("CVE_Items", [])
         else:
             # When passed as list, assume format will be detected from item structure
             nvd_items = source
