@@ -144,5 +144,37 @@ class TestPrintMethods:
         assert len(captured.out) > 0
 
 
+class TestCVDFormatterPlainText:
+    """Tests for plain text formatting methods."""
+
+    def test_format_summary_returns_string(self):
+        """format_summary returns a string with CVE ID."""
+        vuln = CVDVulnerability("CVE-2024-001", state="VFdpxa")
+        result = CVDFormatter.format_summary(vuln)
+        assert isinstance(result, str)
+        assert "CVE-2024-001" in result
+
+    def test_format_summary_includes_state(self):
+        """format_summary includes state string."""
+        vuln = CVDVulnerability("CVE-2024-001", state="VFdpxa")
+        result = CVDFormatter.format_summary(vuln)
+        assert "VFdpxa" in result
+
+    def test_format_timeline_returns_string(self):
+        """format_timeline returns a string with event labels."""
+        vuln = CVDVulnerability("CVE-2024-001")
+        vuln.apply_event(CVDEvent.V)
+        result = CVDFormatter.format_timeline(vuln)
+        assert isinstance(result, str)
+        assert "Vendor Awareness" in result
+
+    def test_format_timeline_with_notes(self):
+        """format_timeline includes notes when requested."""
+        vuln = CVDVulnerability("CVE-2024-001")
+        vuln.apply_event(CVDEvent.V, notes="Found by researcher")
+        result = CVDFormatter.format_timeline(vuln, include_notes=True)
+        assert "Found by researcher" in result
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

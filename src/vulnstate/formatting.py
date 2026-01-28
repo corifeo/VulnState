@@ -431,3 +431,76 @@ class CVDFormatter:
         lines.append(f"\nComplete (VFDPXA): {terminal_count}/{n} ({terminal_count / n * 100:.1f}%)")
 
         return "\n".join(lines)
+
+    @staticmethod
+    def format_summary(vuln: "CVDVulnerability") -> str:
+        """Plain text summary of vulnerability.
+
+        Args:
+            vuln: CVDVulnerability object to format
+
+        Returns:
+            Multi-line string with vulnerability details and history
+        """
+        lines = [
+            f"Vulnerability ID: {vuln.cve_id or vuln.vuln_id}",
+            f"Current State: {vuln.state_str}",
+            f"State Label: {vuln.state_label}",
+            f"History: {vuln.history_string}",
+            f"Terminal: {vuln.is_terminal()}",
+            "",
+        ]
+
+        if vuln.metadata:
+            lines.append("Metadata:")
+            for key, value in vuln.metadata.items():
+                lines.append(f"  {key}: {value}")
+            lines.append("")
+
+        lines.append("Event History:")
+        for trans in vuln.history:
+            if trans["event"] is None:
+                continue
+
+            ts_str = trans["timestamp"].strftime("%Y-%m-%d %H:%M:%S")
+            lines.append(f"  {ts_str}: {trans['event'].name} ({EVENT_LABELS[trans['event']]})")
+            if trans["actor"]:
+                lines.append(f"    Actor: {trans['actor']}")
+            if trans["notes"]:
+                lines.append(f"    Notes: {trans['notes']}")
+
+        return "\n".join(lines)
+
+    @staticmethod
+    def format_timeline(vuln: "CVDVulnerability", include_notes: bool = True) -> str:
+        """Plain text timeline of events.
+
+        Args:
+            vuln: CVDVulnerability object
+            include_notes: Include notes field from history entries
+
+        Returns:
+            Formatted timeline string with one event per line
+        """
+        if not vuln.history:
+            return "No events in history"
+
+        lines = []
+        for entry in vuln.history:
+            event = entry.get("event")
+            timestamp = entry.get("timestamp")
+            notes = entry.get("notes")
+
+            if event is None:
+                continue
+
+            ts_str = timestamp.strftime("%Y-%m-%d %H:%M:%S") if timestamp else "No timestamp"
+            event_desc = EVENT_LABELS[event]
+            line = f"{ts_str}: {event_desc} ({event.name})"
+
+            if include_notes and notes:
+                line += f" - {notes}"
+
+            lines.append(line)
+
+        return "\n".join(lines)
