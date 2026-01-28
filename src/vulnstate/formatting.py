@@ -53,12 +53,12 @@ class CVDFormatter:
         lines = []
 
         # Header with ID and state
-        lines.append(f"[bold blue]Vulnerability:[/bold blue] {vuln.cve_id or vuln.vuln_id}")
-        lines.append(f"[bold blue]State:[/bold blue] {vuln.state_str}")
+        lines.append(f"[bold blue]Vulnerability:[/bold blue] {vuln.cve_id or vuln.internal_id}")
+        lines.append(f"[bold blue]State:[/bold blue] {vuln.lifecycle.state}")
         lines.append(f"[bold blue]Description:[/bold blue] {vuln.state_description}")
 
         # Fix Path (VFD portion of state) and history
-        fix_path_text = vuln.state_str[:3]  # First 3 chars are VFD (fix path)
+        fix_path_text = vuln.lifecycle.state[:3]  # First 3 chars are VFD (fix path)
         lines.append(f"[bold blue]Fix Path:[/bold blue] {fix_path_text}")
         lines.append(f"[bold blue]History:[/bold blue] {vuln.history_string}")
 
@@ -86,7 +86,7 @@ class CVDFormatter:
         content = "\n".join(lines)
         return Panel(
             content,
-            title=f"[bold cyan]{vuln.cve_id or vuln.vuln_id}[/bold cyan]",
+            title=f"[bold cyan]{vuln.cve_id or vuln.internal_id}[/bold cyan]",
             border_style="cyan",
         )
 
@@ -101,7 +101,7 @@ class CVDFormatter:
         Returns:
             rich.Tree with formatted history
         """
-        tree = Tree(f"[bold cyan]History for {vuln.cve_id or vuln.vuln_id}[/bold cyan]")
+        tree = Tree(f"[bold cyan]History for {vuln.cve_id or vuln.internal_id}[/bold cyan]")
 
         if not vuln.history:
             tree.add("[dim]No history recorded[/dim]")
@@ -252,7 +252,7 @@ class CVDFormatter:
         table.add_column("Description", style=CVDFormatter.COLOR_MUTED)
 
         # Fix Path (VFD)
-        fix_path = vuln.state_str[:3]
+        fix_path = vuln.lifecycle.state[:3]
         fix_path_color = CVDFormatter._get_fix_path_color(fix_path)
         fix_path_desc = {
             "vfd": "NO_AWARENESS - Vendor unaware",
@@ -266,7 +266,7 @@ class CVDFormatter:
         )
 
         # Threat State (PXA)
-        threat_state = vuln.state_str[3:]
+        threat_state = vuln.lifecycle.state[3:]
         threat_state_desc = {
             "pxa": "LATENT - No disclosure",
             "Pxa": "DISCLOSED - Publicly known",
@@ -443,8 +443,8 @@ class CVDFormatter:
             Multi-line string with vulnerability details and history
         """
         lines = [
-            f"Vulnerability ID: {vuln.cve_id or vuln.vuln_id}",
-            f"Current State: {vuln.state_str}",
+            f"Vulnerability ID: {vuln.cve_id or vuln.internal_id}",
+            f"Current State: {vuln.lifecycle.state}",
             f"State Label: {vuln.state_label}",
             f"History: {vuln.history_string}",
             f"Terminal: {vuln.is_terminal()}",

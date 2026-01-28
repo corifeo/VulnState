@@ -66,7 +66,7 @@ class TestStateLabels:
 
         # After applying P event, label should update
         vuln.apply_event(CVDEvent.P)
-        assert "P" in vuln.state_str or vuln.state_label is not None
+        assert "P" in vuln.lifecycle.state or vuln.state_label is not None
 
 
 class TestFactoryMethods:
@@ -74,7 +74,7 @@ class TestFactoryMethods:
 
     def test_zeros_creates_initial_state(self):
         """zeros() creates array with all vfdpxa states."""
-        arr = CVDArray.zeros(5, vuln_id_prefix="ZERO")
+        arr = CVDArray.zeros(5, internal_id_prefix="ZERO")
         assert len(arr) == 5
 
         states = set(arr.states)
@@ -82,7 +82,7 @@ class TestFactoryMethods:
 
     def test_ones_creates_terminal_state(self):
         """ones() creates array with all VFDPXA states."""
-        arr = CVDArray.ones(5, vuln_id_prefix="TERM")
+        arr = CVDArray.ones(5, internal_id_prefix="TERM")
         assert len(arr) == 5
 
         states = set(arr.states)
@@ -90,7 +90,7 @@ class TestFactoryMethods:
 
     def test_random_creates_valid_states(self):
         """random() creates array with valid random states."""
-        arr = CVDArray.random(10, vuln_id_prefix="RND", seed=42)
+        arr = CVDArray.random(10, internal_id_prefix="RND", seed=42)
         assert len(arr) == 10
 
         # All states should be non-empty strings

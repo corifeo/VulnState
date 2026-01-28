@@ -125,7 +125,7 @@ class TestArrayLengthInvariants:
         assert n == 5
         assert len(subset.states) == n
         assert len(subset.state_ints) == n
-        assert len(subset.vuln_ids) == n
+        assert len(subset.internal_ids) == n
 
     def test_empty_array_operations(self):
         """Empty arrays should handle operations without error."""

@@ -113,13 +113,13 @@ class TestCVSSScore:
 class TestVulnerabilityIdentity:
     """Tests for VulnerabilityIdentity dataclass."""
 
-    def test_vulnerability_identity_auto_generates_vuln_id(self):
-        """VulnerabilityIdentity auto-generates vuln_id."""
+    def test_vulnerability_identity_auto_generates_internal_id(self):
+        """VulnerabilityIdentity auto-generates internal_id."""
         from vulnstate.models import VulnerabilityIdentity
 
         identity = VulnerabilityIdentity(cve_id="CVE-2024-1234")
-        assert identity.vuln_id is not None
-        assert len(identity.vuln_id) == 36  # UUID format
+        assert identity.internal_id is not None
+        assert len(identity.internal_id) == 36  # UUID format
         assert identity.cve_id == "CVE-2024-1234"
 
 
@@ -168,11 +168,11 @@ class TestArrayIdentifiers:
         from vulnstate.models import ArrayIdentifiers
 
         ids = ArrayIdentifiers(
-            vuln_id=np.array(["v1", "v2"], dtype=object),
+            internal_id=np.array(["v1", "v2"], dtype=object),
             cve_id=np.array(["CVE-2024-1", "CVE-2024-2"], dtype=object),
         )
         assert ids.cve_id[0] == "CVE-2024-1"
-        assert ids.vuln_id[1] == "v2"
+        assert ids.internal_id[1] == "v2"
 
 
 class TestArrayState:

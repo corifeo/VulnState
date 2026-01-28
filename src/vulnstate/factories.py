@@ -27,14 +27,14 @@ from .constants import (
 from .vulnerability import CVDVulnerability
 
 
-def create_zeros(n: int, vuln_id_prefix: Optional[str] = None) -> "CVDArray":
+def create_zeros(n: int, internal_id_prefix: Optional[str] = None) -> "CVDArray":
     """Create fixed-size array of n vulnerabilities in initial state (vfdpxa).
 
     All vulnerabilities start in the initial 'vfdpxa' state with no events applied.
 
     Args:
         n: Number of vulnerabilities to create (fixed capacity)
-        vuln_id_prefix: Optional prefix for auto-generated CVE IDs
+        internal_id_prefix: Optional prefix for auto-generated CVE IDs
 
     Returns:
         Fixed-size CVDArray with n vulnerabilities in vfdpxa state
@@ -43,20 +43,20 @@ def create_zeros(n: int, vuln_id_prefix: Optional[str] = None) -> "CVDArray":
 
     vulns = []
     for i in range(n):
-        cve_id = f"{vuln_id_prefix}-{i:05d}" if vuln_id_prefix else None
+        cve_id = f"{internal_id_prefix}-{i:05d}" if internal_id_prefix else None
         vuln = CVDVulnerability(cve_id=cve_id)
         vulns.append(vuln)
     return CVDArray(vulns, fixed_size=True)
 
 
-def create_ones(n: int, vuln_id_prefix: Optional[str] = None) -> "CVDArray":
+def create_ones(n: int, internal_id_prefix: Optional[str] = None) -> "CVDArray":
     """Create fixed-size array of n vulnerabilities in terminal state (VFDPXA).
 
     All vulnerabilities start with all events announced (VFDPXA state).
 
     Args:
         n: Number of vulnerabilities to create (fixed capacity)
-        vuln_id_prefix: Optional prefix for auto-generated CVE IDs
+        internal_id_prefix: Optional prefix for auto-generated CVE IDs
 
     Returns:
         Fixed-size CVDArray with n vulnerabilities in VFDPXA state
@@ -65,7 +65,7 @@ def create_ones(n: int, vuln_id_prefix: Optional[str] = None) -> "CVDArray":
 
     vulns = []
     for i in range(n):
-        cve_id = f"{vuln_id_prefix}-{i:05d}" if vuln_id_prefix else None
+        cve_id = f"{internal_id_prefix}-{i:05d}" if internal_id_prefix else None
         vuln = CVDVulnerability(
             cve_id=cve_id,
             vendor_aware=True,
@@ -81,7 +81,7 @@ def create_ones(n: int, vuln_id_prefix: Optional[str] = None) -> "CVDArray":
 
 
 def create_random(
-    n: int, vuln_id_prefix: Optional[str] = None, seed: Optional[int] = None
+    n: int, internal_id_prefix: Optional[str] = None, seed: Optional[int] = None
 ) -> "CVDArray":
     """Create fixed-size array of n vulnerabilities with random valid states.
 
@@ -89,7 +89,7 @@ def create_random(
 
     Args:
         n: Number of vulnerabilities to create (fixed capacity)
-        vuln_id_prefix: Optional prefix for auto-generated CVE IDs
+        internal_id_prefix: Optional prefix for auto-generated CVE IDs
         seed: Optional random seed for reproducibility
 
     Returns:
@@ -103,7 +103,7 @@ def create_random(
     valid_states = get_all_valid_states()
     vulns = []
     for i in range(n):
-        cve_id = f"{vuln_id_prefix}-{i:05d}" if vuln_id_prefix else None
+        cve_id = f"{internal_id_prefix}-{i:05d}" if internal_id_prefix else None
         random_state_str = np.random.choice(valid_states)
         state_int = string_to_state_int(random_state_str)
         vuln = CVDVulnerability(

@@ -112,7 +112,7 @@ class TestNVDRoundTrip:
 
             assert len(orig.cwes) == len(reimp.cwes), f"cwes length mismatch at index {i}"
             # State comparison
-            assert orig.state_str == reimp.state_str, f"state mismatch at index {i}"
+            assert orig.lifecycle.state == reimp.lifecycle.state, f"state mismatch at index {i}"
 
     def test_source_populated_not_empty_lists(self) -> None:
         """Verify _source contains actual data, not initialized empty lists."""
@@ -162,10 +162,10 @@ class TestArrayToStateMachines:
         assert extracted_2.has_event_occurred(CVDEvent.F)
 
         # 5. Apply mutations (state changes)
-        original_state_1 = extracted_1.state_str
+        original_state_1 = extracted_1.lifecycle.state
         extracted_1.apply_event(CVDEvent.F)
         assert extracted_1.has_event_occurred(CVDEvent.F), "State machine should be mutable"
-        assert extracted_1.state_str != original_state_1, "State should have changed"
+        assert extracted_1.lifecycle.state != original_state_1, "State should have changed"
 
     def test_extracted_vulnerabilities_preserve_enrichment(self) -> None:
         """Extracted vulnerabilities should have enrichment data from _source."""
@@ -331,4 +331,4 @@ class TestGenerateMethod:
 
         for i in range(len(arr)):
             assert arr[i].cve_id == reimported[i].cve_id
-            assert arr[i].state_str == reimported[i].state_str
+            assert arr[i].lifecycle.state == reimported[i].lifecycle.state

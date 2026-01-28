@@ -584,7 +584,7 @@ class CVDIO:
         # Build DataFrame directly from arrays (vectorized, fast)
         data: dict[str, Any] = {
             "cve_id": arr.cve_ids,
-            "vuln_id": arr.vuln_ids,
+            "internal_id": arr.internal_ids,
             "state": arr.states,
             "cvss_score": arr.cvss_scores,
             "epss": arr.epss,
@@ -739,8 +739,8 @@ class CVDIO:
         """
         data: dict[str, Any] = {
             "cve_id": vuln.cve_id,
-            "vuln_id": vuln.vuln_id,
-            "state": vuln.state_str,
+            "internal_id": vuln.internal_id,
+            "state": vuln.lifecycle.state,
             "metadata": dict(vuln.metadata) if vuln.metadata else {},
             "cvss_score": vuln.cvss_score,
             "epss": vuln.epss,
@@ -772,9 +772,6 @@ class CVDIO:
                 for entry in vuln.history
             ],
         }
-
-        # Inferred events
-        data["inferred_events"] = [e.name for e in vuln.state.inferred_events]
 
         # New API v2 enrichment fields
         if vuln.cvss_scores:
@@ -809,6 +806,7 @@ class CVDIO:
         from datetime import datetime
 
         from .constants import CVDEvent, string_to_state_int
+        from .lifecycle import ScalarLifecycle
         from .models import (
             CVSSScore,
             CWEEntry,
@@ -816,11 +814,10 @@ class CVDIO:
             ExploitReference,
             KEVEntry,
             VulnerabilityIdentity,
-            VulnerabilityState,
         )
         from .vulnerability import CVDVulnerability
 
-        vuln_id = data.get("vuln_id") or data.get("internal_id")
+        internal_id = data.get("internal_id") or data.get("vuln_id")  # Support legacy "vuln_id"
 
         def parse_timestamp(ts_str: Optional[str]) -> Optional[datetime]:
             # Handle None, "TIMESTAMP_UNKNOWN" (legacy), or missing timestamps
@@ -828,11 +825,13 @@ class CVDIO:
                 return None  # TIMESTAMP_UNKNOWN
             return datetime.fromisoformat(ts_str)
 
-        events = {
+        # Parse event timestamps into dict
+        timestamps: dict[CVDEvent, Optional[datetime]] = {
             CVDEvent[event_name]: parse_timestamp(timestamp_str)
             for event_name, timestamp_str in data.get("event_timestamps", {}).items()
         }
 
+        # Parse history
         history = [
             {
                 "event": CVDEvent[entry["event"]] if entry["event"] is not None else None,
@@ -850,18 +849,16 @@ class CVDIO:
         ]
 
         vuln = CVDVulnerability.__new__(CVDVulnerability)
-        # Ensure vuln_id is a string (use cve_id as fallback)
-        final_vuln_id = vuln_id or data.get("cve_id") or ""
-        vuln.identity = VulnerabilityIdentity(vuln_id=str(final_vuln_id), cve_id=data.get("cve_id"))
-        vuln.state = VulnerabilityState(
-            state_encoded=string_to_state_int(data.get("state", "vfdpxa")),
-            events=events,
-            history=history,
-        )
+        # Ensure internal_id is a string (use cve_id as fallback)
+        final_id = internal_id or data.get("cve_id") or ""
+        vuln.identity = VulnerabilityIdentity(internal_id=str(final_id), cve_id=data.get("cve_id"))
 
-        # Restore inferred events
-        inferred_names = data.get("inferred_events", [])
-        vuln.state.inferred_events = {CVDEvent[name] for name in inferred_names}
+        # Reconstruct lifecycle from bitmask and timestamps
+        bitmask = string_to_state_int(data.get("state", "vfdpxa"))
+        vuln._lifecycle = ScalarLifecycle(bitmask=bitmask, timestamps=timestamps)
+
+        # History tracking
+        vuln._history = history
 
         # API v2 enrichment fields
         vuln._cvss_scores = (

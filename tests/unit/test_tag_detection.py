@@ -1,72 +1,12 @@
 """Tests for NVD reference tag detection and event inference."""
 
-from datetime import datetime
 
 import pytest
 
-from vulnstate import CVDEvent, CVDVulnerability
+from vulnstate import CVDEvent
 from vulnstate.parsers import NVDParser
 
 pytestmark = pytest.mark.unit
-
-
-class TestInferredEventFlag:
-    """VulnerabilityState tracks which events are inferred."""
-
-    def test_inferred_events_empty_by_default(self):
-        vuln = CVDVulnerability("CVE-2023-0001")
-        assert vuln.state.inferred_events == set()
-
-    def test_apply_event_not_inferred_by_default(self):
-        vuln = CVDVulnerability("CVE-2023-0001")
-        vuln.apply_event(CVDEvent.P, timestamp=datetime(2023, 1, 1))
-        assert CVDEvent.P not in vuln.state.inferred_events
-
-    def test_apply_event_inferred_flag(self):
-        vuln = CVDVulnerability("CVE-2023-0001")
-        vuln.apply_event(CVDEvent.V, timestamp=datetime(2023, 1, 1), inferred=True)
-        assert CVDEvent.V in vuln.state.inferred_events
-
-    def test_inferred_flag_with_none_timestamp(self):
-        vuln = CVDVulnerability("CVE-2023-0001")
-        vuln.apply_event(CVDEvent.V, timestamp=datetime(2023, 1, 1))
-        vuln.apply_event(CVDEvent.F, timestamp=None, inferred=True)
-        assert CVDEvent.F in vuln.state.inferred_events
-        assert vuln.has_event_occurred(CVDEvent.F)
-        assert not vuln.has_known_timestamp(CVDEvent.F)
-
-    def test_rollback_removes_inferred_flag(self):
-        vuln = CVDVulnerability("CVE-2023-0001")
-        vuln.apply_event(CVDEvent.V, timestamp=datetime(2023, 1, 1), inferred=True)
-        assert CVDEvent.V in vuln.state.inferred_events
-        vuln.rollback_event()
-        assert CVDEvent.V not in vuln.state.inferred_events
-
-
-class TestInferredEventSerialization:
-    """Inferred flag survives serialization round-trip."""
-
-    def test_to_dict_includes_inferred(self):
-        vuln = CVDVulnerability("CVE-2023-0001")
-        vuln.apply_event(CVDEvent.P, timestamp=datetime(2023, 1, 1))
-        vuln.apply_event(CVDEvent.V, timestamp=datetime(2023, 1, 1), inferred=True)
-        vuln.apply_event(CVDEvent.F, timestamp=datetime(2023, 6, 1), inferred=True)
-        data = vuln.to_dict()
-        assert "inferred_events" in data
-        assert "F" in data["inferred_events"]
-        assert "V" in data["inferred_events"]
-        assert "P" not in data["inferred_events"]
-
-    def test_from_dict_restores_inferred(self):
-        vuln = CVDVulnerability("CVE-2023-0001")
-        vuln.apply_event(CVDEvent.P, timestamp=datetime(2023, 1, 1))
-        vuln.apply_event(CVDEvent.V, timestamp=datetime(2023, 1, 1), inferred=True)
-        vuln.apply_event(CVDEvent.F, timestamp=datetime(2023, 6, 1), inferred=True)
-        data = vuln.to_dict()
-        restored = CVDVulnerability.from_dict(data)
-        assert CVDEvent.F in restored.state.inferred_events
-        assert CVDEvent.V in restored.state.inferred_events
-        assert CVDEvent.P not in restored.state.inferred_events
 
 
 class TestExtractReferenceTags:
@@ -148,7 +88,6 @@ class TestTagEventDetection:
         arr.import_nvd([item])
         vuln = arr.get(0)
         assert vuln.has_event_occurred(CVDEvent.F)
-        assert CVDEvent.F in vuln.state.inferred_events
 
     def test_exploit_tag_applies_X(self):
         from vulnstate import CVDArray
@@ -158,7 +97,6 @@ class TestTagEventDetection:
         arr.import_nvd([item])
         vuln = arr.get(0)
         assert vuln.has_event_occurred(CVDEvent.X)
-        assert CVDEvent.X in vuln.state.inferred_events
 
     def test_vendor_advisory_applies_V_with_published_date(self):
         from vulnstate import CVDArray
@@ -230,7 +168,6 @@ class TestTagEventDetection:
         arr.import_nvd([item], infer_vendor=True)  # default
         vuln = arr.get(0)
         assert vuln.has_event_occurred(CVDEvent.V)
-        assert CVDEvent.V in vuln.state.inferred_events
 
     def test_multiple_tags_all_applied(self):
         from vulnstate import CVDArray

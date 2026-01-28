@@ -746,7 +746,7 @@ class NVDParser:
         if infer_vendor and published_dt:
             v_ts = published_dt if infer_timestamps else None
             with contextlib.suppress(ValueError):
-                vuln.apply_event(CVDEvent.V, timestamp=v_ts, inferred=True)
+                vuln.apply_event(CVDEvent.V, timestamp=v_ts)
 
         # Detect events from reference tags
         ref_tags = NVDParser.extract_reference_tags(item, format_version)
@@ -762,26 +762,26 @@ class NVDParser:
                 if vuln.has_event_occurred(CVDEvent.V):
                     vuln.events[CVDEvent.V] = v_ts
                 else:
-                    vuln.apply_event(CVDEvent.V, timestamp=v_ts, inferred=True)
+                    vuln.apply_event(CVDEvent.V, timestamp=v_ts)
         elif "Third Party Advisory" in ref_tags:
             v_ts = last_modified_dt if infer_timestamps else None
             with contextlib.suppress(ValueError):
                 if vuln.has_event_occurred(CVDEvent.V):
                     vuln.events[CVDEvent.V] = v_ts
                 else:
-                    vuln.apply_event(CVDEvent.V, timestamp=v_ts, inferred=True)
+                    vuln.apply_event(CVDEvent.V, timestamp=v_ts)
 
         # F from Patch tag (100% reliable - patch exists)
         if "Patch" in ref_tags:
             f_ts = last_modified_dt if infer_timestamps else None
             with contextlib.suppress(ValueError):
-                vuln.apply_event(CVDEvent.F, timestamp=f_ts, inferred=True)
+                vuln.apply_event(CVDEvent.F, timestamp=f_ts)
 
         # X from Exploit tag
         if "Exploit" in ref_tags:
             x_ts = last_modified_dt if infer_timestamps else None
             with contextlib.suppress(ValueError):
-                vuln.apply_event(CVDEvent.X, timestamp=x_ts, inferred=True)
+                vuln.apply_event(CVDEvent.X, timestamp=x_ts)
 
         # Check for versionEndExcluding in configurations (fix version boundary)
         has_version_end = False

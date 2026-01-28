@@ -42,8 +42,8 @@ def infer_events(
     infers V from Patch tag, applies D from F + lag.
     Tier 2 (heuristics=True): CPE/CVSS-based F inference, age-based V.
 
-    All inferred events are flagged with inferred=True. Never overwrites
-    events that are not already flagged as inferred.
+    All inferred events are added via apply_event(). Never overwrites
+    events that have already occurred.
 
     Args:
         arr: CVDArray to enrich
@@ -80,8 +80,8 @@ def infer_events(
         p_ts = vuln.events.get(CVDEvent.P)
 
         # --- V inference ---
-        # Only infer if V not set OR was previously inferred (can refine)
-        if not vuln.has_event_occurred(CVDEvent.V) or (CVDEvent.V in vuln.state.inferred_events):
+        # Only infer if V not set
+        if not vuln.has_event_occurred(CVDEvent.V):
             v_ts: Optional[datetime] = None
 
             if "Vendor Advisory" in ref_tags and p_ts is not None:
@@ -100,7 +100,7 @@ def infer_events(
                     # Update timestamp on already-inferred V
                     vuln.events[CVDEvent.V] = v_ts
                 else:
-                    vuln.apply_event(CVDEvent.V, timestamp=v_ts, inferred=True)
+                    vuln.apply_event(CVDEvent.V, timestamp=v_ts)
                 summary["V_inferred"] += 1
 
         # --- F inference ---
@@ -124,10 +124,10 @@ def infer_events(
             if f_ts is not None:
                 # F requires V first - ensure V is set
                 if not vuln.has_event_occurred(CVDEvent.V) and p_ts is not None:
-                    vuln.apply_event(CVDEvent.V, timestamp=p_ts, inferred=True)
+                    vuln.apply_event(CVDEvent.V, timestamp=p_ts)
 
                 with contextlib.suppress(ValueError):
-                    vuln.apply_event(CVDEvent.F, timestamp=f_ts, inferred=True)
+                    vuln.apply_event(CVDEvent.F, timestamp=f_ts)
                     summary["F_inferred"] += 1
 
         # --- D inference ---
@@ -157,7 +157,7 @@ def infer_events(
 
                 d_ts = f_ts_val + timedelta(days=lag)
                 with contextlib.suppress(ValueError):
-                    vuln.apply_event(CVDEvent.D, timestamp=d_ts, inferred=True)
+                    vuln.apply_event(CVDEvent.D, timestamp=d_ts)
                     summary["D_inferred"] += 1
 
     # Sync array state

@@ -4,8 +4,9 @@
 Provides:
 - LifecycleState: Abstract base for CVD lifecycle
 - ScalarLifecycle: Single-item lifecycle (pure Python)
+- ScalarTimestampsNamespace: Namespace for vuln.lifecycle.timestamps.V/F/D/P/X/A
 - VectorLifecycle: Vectorized lifecycle (numpy arrays)
-- TimestampsNamespace: Namespace for arr.lifecycle.timestamps.V/F/D/P/X/A
+- TimestampsNamespace: Namespace for arr.lifecycle.timestamps.V/F/D/P/X/A (vector)
 - LifecycleNamespace: Public API namespace for arr.lifecycle.*
 
 Layer: Core
@@ -68,13 +69,64 @@ class LifecycleState(ABC):
         ...
 
 
+class ScalarTimestampsNamespace:
+    """Namespace for vuln.lifecycle.timestamps.V/F/D/P/X/A access.
+
+    Provides attribute-style access to event timestamps for scalar lifecycle.
+
+    Example:
+        >>> vuln.lifecycle.timestamps.V  # When vendor became aware
+        >>> vuln.lifecycle.timestamps.P  # When public became aware
+    """
+
+    def __init__(self, timestamps: dict[CVDEvent, Optional[datetime]]) -> None:
+        self._timestamps = timestamps
+
+    @property
+    def V(self) -> Optional[datetime]:
+        """Vendor awareness timestamp."""
+        return self._timestamps.get(CVDEvent.V)
+
+    @property
+    def F(self) -> Optional[datetime]:
+        """Fix ready timestamp."""
+        return self._timestamps.get(CVDEvent.F)
+
+    @property
+    def D(self) -> Optional[datetime]:
+        """Fix deployed timestamp."""
+        return self._timestamps.get(CVDEvent.D)
+
+    @property
+    def P(self) -> Optional[datetime]:
+        """Public awareness timestamp."""
+        return self._timestamps.get(CVDEvent.P)
+
+    @property
+    def X(self) -> Optional[datetime]:
+        """Exploit public timestamp."""
+        return self._timestamps.get(CVDEvent.X)
+
+    @property
+    def A(self) -> Optional[datetime]:
+        """Attacks observed timestamp."""
+        return self._timestamps.get(CVDEvent.A)
+
+
 class ScalarLifecycle(LifecycleState):
     """Single-item lifecycle. Pure Python, no numpy overhead."""
 
-    def __init__(self) -> None:
-        self._bitmask: int = 0
+    def __init__(
+        self,
+        bitmask: int = 0,
+        timestamps: Optional[dict[CVDEvent, Optional[datetime]]] = None,
+    ) -> None:
+        self._bitmask: int = bitmask
         self._pair_mask: int = 0
-        self._timestamps: dict[CVDEvent, Optional[datetime]] = {}
+        self._timestamps: dict[CVDEvent, Optional[datetime]] = timestamps or {}
+        self._timestamps_ns: Optional[ScalarTimestampsNamespace] = None
+        if timestamps:
+            self._recompute_pair_mask()
 
     @property
     def bitmask(self) -> int:
@@ -85,8 +137,11 @@ class ScalarLifecycle(LifecycleState):
         return self._pair_mask
 
     @property
-    def timestamps(self) -> dict[CVDEvent, Optional[datetime]]:
-        return self._timestamps
+    def timestamps(self) -> ScalarTimestampsNamespace:
+        """Timestamps namespace with .V, .F, .D, .P, .X, .A access."""
+        if self._timestamps_ns is None:
+            self._timestamps_ns = ScalarTimestampsNamespace(self._timestamps)
+        return self._timestamps_ns
 
     @property
     def state(self) -> str:

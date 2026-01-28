@@ -38,14 +38,14 @@ class TestCVDIO:
 
         data = {
             "cve_id": "CVE-2024-5678",
-            "vuln_id": "test-id-123",
+            "internal_id": "test-id-123",
             "state": "Vfdpxa",
             "cvss_score": 7.5,
         }
         vuln = CVDIO.from_dict(data)
 
         assert vuln.cve_id == "CVE-2024-5678"
-        assert vuln.state_str == "Vfdpxa"
+        assert vuln.lifecycle.state == "Vfdpxa"
 
     def test_to_json_roundtrip(self):
         """JSON roundtrip preserves data."""
@@ -214,7 +214,7 @@ class TestNVDImport:
 
         assert len(arr) == 1
         # Should have P event from published date
-        assert "P" in arr[0].state_str  # uppercase P means event occurred
+        assert "P" in arr[0].lifecycle.state  # uppercase P means event occurred
 
 
 # ============================================================================
@@ -282,8 +282,8 @@ class TestDictSerialization:
         vuln2 = CVDVulnerability.from_dict(data)
 
         assert vuln2.cve_id == vuln.cve_id
-        assert vuln2.state_str == vuln.state_str
-        assert vuln2.state.state_encoded == vuln.state.state_encoded
+        assert vuln2.lifecycle.state == vuln.lifecycle.state
+        assert vuln2._lifecycle._bitmask == vuln._lifecycle._bitmask
 
     def test_from_dict_with_metadata(self):
         """Test from_dict preserves metadata."""
@@ -331,8 +331,8 @@ class TestJSONSerialization:
         vuln2 = CVDVulnerability.from_json(json_str)
 
         assert vuln2.cve_id == vuln.cve_id
-        assert vuln2.state_str == vuln.state_str
-        assert vuln2.state.state_encoded == vuln.state.state_encoded
+        assert vuln2.lifecycle.state == vuln.lifecycle.state
+        assert vuln2._lifecycle._bitmask == vuln._lifecycle._bitmask
         assert vuln2.history_string == vuln.history_string
 
     def test_save_load_json_file(self, tmp_path):
@@ -399,8 +399,8 @@ class TestPickleSerialization:
 
         # Verify complete reconstruction
         assert vuln2.cve_id == vuln.cve_id
-        assert vuln2.state_str == vuln.state_str
-        assert vuln2.state.state_encoded == vuln.state.state_encoded
+        assert vuln2.lifecycle.state == vuln.lifecycle.state
+        assert vuln2._lifecycle._bitmask == vuln._lifecycle._bitmask
         assert vuln2.cvss_score == 9.8
 
     def test_pickle_preserves_datetime_exactly(self, tmp_path):
@@ -521,7 +521,7 @@ class TestRoundtripIntegrity:
 
         # Verify all data
         assert vuln2.cve_id == "ROUNDTRIP-001"
-        assert vuln2.state_str == "VFDpxa"  # V, F, and D applied
+        assert vuln2.lifecycle.state == "VFDpxa"  # V, F, and D applied
         assert vuln2.state_label == "VFD"  # Fix deployed
         assert vuln2.history_string == "VFD"
         assert vuln2.metadata["vendor"] == "Linux"
@@ -563,7 +563,7 @@ class TestSerializationEdgeCases:
         vuln2 = CVDVulnerability.from_json(json_str)
 
         assert data["state"] == "vfdpxa"
-        assert vuln2.state_str == "vfdpxa"
+        assert vuln2.lifecycle.state == "vfdpxa"
         assert vuln2.history_string == ""
 
     def test_special_characters_in_metadata(self):
@@ -934,8 +934,8 @@ class TestMetadataPluck:
         # Filter using comparison operators (NaN comparisons return False)
         high_epss = arr[arr.pluck("epss.score") > 0.8]
         assert len(high_epss) == 2
-        assert high_epss.vuln_ids[0] == arr.vuln_ids[0]  # 0.95
-        assert high_epss.vuln_ids[1] == arr.vuln_ids[2]  # 0.88
+        assert high_epss.internal_ids[0] == arr.internal_ids[0]  # 0.95
+        assert high_epss.internal_ids[1] == arr.internal_ids[2]  # 0.88
 
 
 class TestKEVEventApplication:
@@ -1284,7 +1284,7 @@ class TestDataFrameIntegration:
         df = arr.to_dataframe(include_analytics=True, explode_cvss=False, explode_metadata=False)
 
         # Expected columns:
-        # - cve_id, vuln_id, state, state_label (4 identity/state)
+        # - cve_id, internal_id, state, state_label (4 identity/state)
         # - cvss_score, epss, kev (3 scoring/enrichment)
         # - V_timestamp, F_timestamp, D_timestamp, P_timestamp, X_timestamp, A_timestamp (6 timestamps)
         # - attack_vector, attack_complexity, privileges_required, user_interaction, scope,

@@ -25,7 +25,7 @@ class TestScalarLifecycle:
         lc = ScalarLifecycle()
         ts = datetime(2024, 1, 15)
         lc.apply_event(CVDEvent.V, timestamp=ts)
-        assert lc.timestamps[CVDEvent.V] == ts
+        assert ts == lc.timestamps.V
 
     def test_vfd_constraint_enforced(self):
         lc = ScalarLifecycle()

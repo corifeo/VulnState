@@ -64,7 +64,7 @@ class CVDArray:
 
     Storage Layout:
         - states: np.ndarray (N,) uint8 - internal integer state for each vuln
-        - vuln_ids: np.ndarray (N,) object - vulnerability identifiers
+        - internal_ids: np.ndarray (N,) object - vulnerability identifiers
         - event_timestamps: Dict[CVDEvent, np.ndarray] - per-event timestamps
         - metadata: Dict[str, np.ndarray] - metadata fields
 
@@ -101,7 +101,7 @@ class CVDArray:
         self._vulnerabilities: np.ndarray = np.array([], dtype=object)
 
         # Data components (dataclasses)
-        self.identifiers = ArrayIdentifiers()  # vuln_id + cve_id
+        self.identifiers = ArrayIdentifiers()  # internal_id + cve_id
         self.timestamps = ArrayTimestamps()  # Event timestamps (V, F, D, P, X, A)
         self.cvd_analytics = ArrayCVDAnalytics()  # Precomputed pair_mask, history_id
         self._metadata_data = ArrayMetadata()  # Legacy metadata storage
@@ -202,9 +202,9 @@ class CVDArray:
         # Live vulnerability objects
         self._vulnerabilities = np.array(vulnerabilities, dtype=object)
 
-        # State array
+        # State array - get bitmask from lifecycle
         self.state.bitmask = np.array(
-            [v.state.state_encoded for v in vulnerabilities], dtype=np.uint8
+            [v._lifecycle.bitmask for v in vulnerabilities], dtype=np.uint8
         )
 
         # Initialize _source with empty lists for each vulnerability (API v2)
@@ -233,8 +233,8 @@ class CVDArray:
         self.timestamps.A = np.full(n, np.datetime64("NaT"), dtype="datetime64[us]")
 
         # Identifiers
-        self.identifiers.vuln_id = np.array(
-            [v.identity.vuln_id for v in vulnerabilities], dtype=object
+        self.identifiers.internal_id = np.array(
+            [v.identity.internal_id for v in vulnerabilities], dtype=object
         )
         self.identifiers.cve_id = np.array(
             [v.identity.cve_id for v in vulnerabilities], dtype=object
@@ -251,7 +251,7 @@ class CVDArray:
             for event in CVDEvent:
                 timestamps = []
                 for v in vulnerabilities:
-                    ts = v.state.events.get(event)
+                    ts = v._lifecycle._timestamps.get(event)
                     if ts:
                         timestamps.append(np.datetime64(ts, "us"))
                     else:
@@ -525,14 +525,14 @@ class CVDArray:
         self.state.bitmask = value
 
     @property
-    def vuln_ids(self) -> np.ndarray:
+    def internal_ids(self) -> np.ndarray:
         """Vulnerability UUID array (object dtype)."""
-        return self.identifiers.vuln_id
+        return self.identifiers.internal_id
 
-    @vuln_ids.setter
-    def vuln_ids(self, value: np.ndarray) -> None:
+    @internal_ids.setter
+    def internal_ids(self, value: np.ndarray) -> None:
         """Vulnerability UUID array (object dtype)."""
-        self.identifiers.vuln_id = value
+        self.identifiers.internal_id = value
 
     @property
     def cve_ids(self) -> np.ndarray:
@@ -1011,7 +1011,7 @@ class CVDArray:
             # Return subset as new CVDArray
             subset = CVDArray()
             subset.state_ints = self.state_ints[idx]
-            subset.vuln_ids = self.vuln_ids[idx]
+            subset.internal_ids = self.internal_ids[idx]
             subset._vulnerabilities = self._vulnerabilities[idx]
 
             # Copy timestamp data
@@ -1350,12 +1350,12 @@ class CVDArray:
         for idx in to_sync:
             vuln = self._vulnerabilities[idx]
 
-            # Update state and identifiers
-            self.state.bitmask[idx] = vuln.state.state_encoded
-            self.identifiers.vuln_id[idx] = vuln.identity.vuln_id
+            # Update state and identifiers from lifecycle
+            self.state.bitmask[idx] = vuln._lifecycle.bitmask
+            self.identifiers.internal_id[idx] = vuln.identity.internal_id
             self.identifiers.cve_id[idx] = vuln.identity.cve_id
 
-            # Extract timestamps to exploded arrays
+            # Extract timestamps to exploded arrays from lifecycle
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", UserWarning)
                 for event, attr_name in [
@@ -1366,7 +1366,7 @@ class CVDArray:
                     (CVDEvent.X, "X"),
                     (CVDEvent.A, "A"),
                 ]:
-                    ts = vuln.state.events.get(event)
+                    ts = vuln._lifecycle._timestamps.get(event)
                     if ts:
                         getattr(self.timestamps, attr_name)[idx] = np.datetime64(ts, "us")
                     else:
@@ -1675,7 +1675,7 @@ class CVDArray:
 
         Args:
             data: List of vulnerability dicts (from to_dict_batch or manual).
-                  Each dict should have at minimum 'cve_id' or 'vuln_id'.
+                  Each dict should have at minimum 'cve_id' or 'internal_id'.
                   Optional fields: 'state', 'cvss_scores', 'epss_scores', etc.
             on_error: Error handling mode:
                 - "skip": Skip invalid records silently (default)
@@ -1703,21 +1703,21 @@ class CVDArray:
     # Implementations delegated to factories module; see factories.py for details
 
     @classmethod
-    def zeros(cls, n: int, vuln_id_prefix: Optional[str] = None) -> "CVDArray":
+    def zeros(cls, n: int, internal_id_prefix: Optional[str] = None) -> "CVDArray":
         """Create fixed-size array of n vulnerabilities in initial state (vfdpxa)."""
-        return _factories.create_zeros(n, vuln_id_prefix)
+        return _factories.create_zeros(n, internal_id_prefix)
 
     @classmethod
-    def ones(cls, n: int, vuln_id_prefix: Optional[str] = None) -> "CVDArray":
+    def ones(cls, n: int, internal_id_prefix: Optional[str] = None) -> "CVDArray":
         """Create fixed-size array of n vulnerabilities in terminal state (VFDPXA)."""
-        return _factories.create_ones(n, vuln_id_prefix)
+        return _factories.create_ones(n, internal_id_prefix)
 
     @classmethod
     def random(
-        cls, n: int, vuln_id_prefix: Optional[str] = None, seed: Optional[int] = None
+        cls, n: int, internal_id_prefix: Optional[str] = None, seed: Optional[int] = None
     ) -> "CVDArray":
         """Create fixed-size array of n vulnerabilities with random valid states."""
-        return _factories.create_random(n, vuln_id_prefix, seed)
+        return _factories.create_random(n, internal_id_prefix, seed)
 
     @classmethod
     def generate(

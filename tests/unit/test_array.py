@@ -46,12 +46,12 @@ class TestBatchCreation:
 
         assert arr.state_ints.dtype == np.uint8
 
-    def test_vuln_ids_stored_as_object(self):
+    def test_internal_ids_stored_as_object(self):
         """Verify IDs are stored as objects."""
         vulns = [CVDVulnerability("CVE-2024-001")]
         arr = CVDArray(vulns)
 
-        assert arr.vuln_ids.dtype == object
+        assert arr.internal_ids.dtype == object
 
 
 class TestBatchIndexing:
@@ -66,7 +66,7 @@ class TestBatchIndexing:
 
         assert isinstance(v, CVDVulnerability)
         # Array stores internal_id, not cve_id
-        assert v.vuln_id == vulns[1].vuln_id
+        assert v.internal_id == vulns[1].internal_id
 
     def test_slice_indexing(self):
         """Verify slice indexing returns CVDArray."""
@@ -99,7 +99,7 @@ class TestBatchIndexing:
         v = arr[-1]
 
         # Array stores internal_id, not cve_id
-        assert v.vuln_id == vulns[-1].vuln_id
+        assert v.internal_id == vulns[-1].internal_id
 
     def test_index_out_of_bounds(self):
         """Verify out of bounds raises IndexError."""

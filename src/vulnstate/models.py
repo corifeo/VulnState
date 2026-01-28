@@ -10,12 +10,12 @@ Provides:
 - ScoreResult: Computed scores from ScoreExtractor transform
 - AnalyticsResult: Computed analytics from CVDStateAnalyzer transform
 - ArraySource: Source of truth object arrays for CVDArray
-- VulnerabilityIdentity: ID fields (vuln_id, cve_id)
-- VulnerabilityState: State and event tracking
+- VulnerabilityIdentity: ID fields (internal_id, cve_id)
+
 - AnalysisResult: Analytics output from DesiderataExtractor
 - ArrayState: CVD state bitmask array
 - ArrayTimestamps: Event timestamp arrays (V, F, D, P, X, A)
-- ArrayIdentifiers: Vulnerability ID arrays (vuln_id, cve_id)
+- ArrayIdentifiers: Vulnerability ID arrays (internal_id, cve_id)
 - ArrayCVDAnalytics: Precomputed bitmasks for vectorized queries
 - ArrayMetadata: Metadata storage
 - compute_pair_mask(): Vectorized pair ordering computation
@@ -52,7 +52,7 @@ __all__ = [
     "AnalysisResult",
     "CachedAnalyticsProperty",
     "VulnerabilityIdentity",
-    "VulnerabilityState",
+
     "ArrayState",
     "ArrayTimestamps",
     "ArrayIdentifiers",
@@ -550,39 +550,12 @@ class VulnerabilityIdentity:
     """Identity information for a vulnerability.
 
     Attributes:
-        vuln_id: Internal UUID, auto-generated if not provided.
+        internal_id: Internal UUID, auto-generated if not provided.
         cve_id: CVE identifier (e.g., 'CVE-2024-12345').
     """
 
-    vuln_id: str = field(default_factory=lambda: str(uuid4()))
+    internal_id: str = field(default_factory=lambda: str(uuid4()))
     cve_id: Optional[str] = None
-
-
-@dataclass
-class VulnerabilityState:
-    """CVD state for single vulnerability.
-
-    Attributes:
-        state_encoded: 6-bit bitmask encoding which events have occurred (VFDPXA).
-        events: Dict mapping CVDEvent to timestamp (or None for unknown timestamp).
-        history: List of state transition records.
-        inferred_events: Set of events that were inferred (not from authoritative sources).
-    """
-
-    state_encoded: np.uint8 = field(default_factory=lambda: np.uint8(0))
-    events: dict[CVDEvent, Optional[datetime]] = field(default_factory=dict)
-    history: list[dict[str, Any]] = field(default_factory=list)
-    inferred_events: set[CVDEvent] = field(default_factory=set)
-
-    def __str__(self) -> str:
-        """Return state string (e.g., 'VFdpxa') for print/f-strings."""
-        from .constants import state_int_to_string
-
-        return state_int_to_string(int(self.state_encoded))
-
-    def __repr__(self) -> str:
-        """Detailed repr for debugging."""
-        return f"VulnerabilityState(encoded={self.state_encoded}, events={len(self.events)})"
 
 
 # ==================== ARRAY DATACLASSES ====================
@@ -631,17 +604,17 @@ class ArrayIdentifiers:
     """Identifier arrays for vulnerabilities.
 
     Attributes:
-        vuln_id: Internal UUIDs (object dtype).
+        internal_id: Internal UUIDs (object dtype).
         cve_id: CVE identifiers (object dtype).
     """
 
-    vuln_id: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
+    internal_id: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
     cve_id: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
 
     def __getitem__(self, key: Any) -> "ArrayIdentifiers":
         """Slice all arrays consistently."""
         return ArrayIdentifiers(
-            vuln_id=self.vuln_id[key],
+            internal_id=self.internal_id[key],
             cve_id=self.cve_id[key],
         )
 
