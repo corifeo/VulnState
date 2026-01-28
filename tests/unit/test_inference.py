@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import pytest
 
 from vulnstate import CVDArray, CVDEvent, CVDVulnerability
+from vulnstate.transforms.enrichers import infer_events
 
 pytestmark = pytest.mark.unit
 
@@ -64,7 +65,7 @@ class TestInferEventsVendor:
 
     def test_vendor_advisory_offset(self):
         arr = _make_vuln_with_tags("CVE-2023-0001", ["Vendor Advisory"])
-        arr.infer_events(vendor_lead=7)
+        infer_events(arr, vendor_lead=7)
         vuln = arr.get(0)
         p_ts = vuln.events[CVDEvent.P]
         v_ts = vuln.events[CVDEvent.V]
@@ -73,7 +74,7 @@ class TestInferEventsVendor:
 
     def test_third_party_advisory_offset(self):
         arr = _make_vuln_with_tags("CVE-2023-0001", ["Third Party Advisory"])
-        arr.infer_events(thirdparty_lag=14)
+        infer_events(arr, thirdparty_lag=14)
         vuln = arr.get(0)
         p_ts = vuln.events[CVDEvent.P]
         v_ts = vuln.events[CVDEvent.V]
@@ -82,7 +83,7 @@ class TestInferEventsVendor:
 
     def test_patch_tag_implies_V(self):
         arr = _make_vuln_with_tags("CVE-2023-0001", ["Patch"])
-        arr.infer_events()
+        infer_events(arr)
         vuln = arr.get(0)
         # Patch implies vendor was aware
         assert vuln.has_event_occurred(CVDEvent.V)
@@ -93,7 +94,7 @@ class TestInferEventsFix:
 
     def test_cpe_version_boundary_infers_F(self):
         arr = _make_vuln_with_cpe("CVE-2023-0001", "4.2.0")
-        result = arr.infer_events(heuristics=True)
+        result = infer_events(arr, heuristics=True)
         vuln = arr.get(0)
         assert vuln.has_event_occurred(CVDEvent.F)
         assert CVDEvent.F in vuln.state.inferred_events
@@ -101,7 +102,7 @@ class TestInferEventsFix:
 
     def test_heuristics_false_skips_cpe(self):
         arr = _make_vuln_with_cpe("CVE-2023-0001", "4.2.0")
-        arr.infer_events(heuristics=False)
+        infer_events(arr, heuristics=False)
         vuln = arr.get(0)
         assert not vuln.has_event_occurred(CVDEvent.F)
 
@@ -111,7 +112,7 @@ class TestInferEventsDeploy:
 
     def test_deploy_true_applies_D(self):
         arr = _make_vuln_with_tags("CVE-2023-0001", ["Patch"])
-        result = arr.infer_events(deploy=True, deploy_lag=30)
+        result = infer_events(arr, deploy=True, deploy_lag=30)
         vuln = arr.get(0)
         assert vuln.has_event_occurred(CVDEvent.D)
         f_ts = vuln.events[CVDEvent.F]
@@ -122,7 +123,7 @@ class TestInferEventsDeploy:
 
     def test_deploy_false_skips_D(self):
         arr = _make_vuln_with_tags("CVE-2023-0001", ["Patch"])
-        arr.infer_events(deploy=False)
+        infer_events(arr, deploy=False)
         vuln = arr.get(0)
         assert not vuln.has_event_occurred(CVDEvent.D)
 
@@ -150,7 +151,7 @@ class TestInferEventsDeploy:
         }
         arr = CVDArray()
         arr.import_nvd([item], infer_vendor=False)
-        arr.infer_events(deploy=True, severity_adjusted=True)
+        infer_events(arr, deploy=True, severity_adjusted=True)
         vuln = arr.get(0)
         assert vuln.has_event_occurred(CVDEvent.D)
         f_ts = vuln.events[CVDEvent.F]
@@ -169,13 +170,13 @@ class TestInferEventsGeneral:
         vuln.apply_event(CVDEvent.P, timestamp=real_ts)
         vuln.apply_event(CVDEvent.V, timestamp=datetime(2023, 2, 15))  # Authoritative V
         arr = CVDArray([vuln])
-        arr.infer_events(vendor_lead=30)
+        infer_events(arr, vendor_lead=30)
         # V should NOT be overwritten
         assert arr.get(0).events[CVDEvent.V] == datetime(2023, 2, 15)
 
     def test_returns_summary_dict(self):
         arr = _make_vuln_with_tags("CVE-2023-0001", ["Patch", "Vendor Advisory"])
-        result = arr.infer_events(deploy=True, deploy_lag=30)
+        result = infer_events(arr, deploy=True, deploy_lag=30)
         assert isinstance(result, dict)
         assert "V_inferred" in result
         assert "F_inferred" in result
@@ -183,7 +184,7 @@ class TestInferEventsGeneral:
 
     def test_no_events_returns_zeros(self):
         arr = _make_vuln_with_tags("CVE-2023-0001", [])
-        result = arr.infer_events(deploy=False, heuristics=False)
+        result = infer_events(arr, deploy=False, heuristics=False)
         assert result["V_inferred"] == 0
         assert result["F_inferred"] == 0
         assert result["D_inferred"] == 0

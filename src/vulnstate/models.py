@@ -2,11 +2,17 @@
 Data Models - Dataclasses and property descriptors
 
 Provides:
+- CVSSScore: Single CVSS score from specific source with vector parsing
+- EPSSScore: Single EPSS score snapshot with model version
+- CWEEntry: CWE weakness entry with source attribution
+- KEVEntry: CISA KEV catalog entry with due dates
+- ExploitReference: Reference to known exploit code
+- ScoreResult: Computed scores from ScoreExtractor transform
+- AnalyticsResult: Computed analytics from CVDStateAnalyzer transform
+- ArraySource: Source of truth object arrays for CVDArray
 - VulnerabilityIdentity: ID fields (vuln_id, cve_id)
-- VulnerabilityScoring: CVSS scoring fields
-- VulnerabilityEnrichment: EPSS, KEV enrichment
 - VulnerabilityState: State and event tracking
-- AnalysisResult: Analytics output from CVDAnalyzer
+- AnalysisResult: Analytics output from DesiderataExtractor
 - ArrayState: CVD state bitmask array
 - ArrayTimestamps: Event timestamp arrays (V, F, D, P, X, A)
 - ArrayIdentifiers: Vulnerability ID arrays (vuln_id, cve_id)
@@ -16,7 +22,7 @@ Provides:
 
 Layer: Core
 Dependencies: constants.py
-Used by: vulnerability.py, array.py, analyzer.py, serialization.py, io.py
+Used by: vulnerability.py, array.py, serialization.py, io.py
 """
 
 from dataclasses import dataclass, field
@@ -26,7 +32,482 @@ from uuid import uuid4
 
 import numpy as np
 
-from .constants import CVDEvent
+from .constants import CVDEvent, FixPath, ThreatState
+
+__all__ = [
+    # New API v2 dataclasses
+    "CVSSScore",
+    "CVSSMetrics",
+    "EPSSScore",
+    "CWEEntry",
+    "CWE",
+    "CPE",
+    "KEVEntry",
+    "KEV",
+    "ExploitReference",
+    "ScoreResult",
+    "AnalyticsResult",
+    "ArraySource",
+    # Core dataclasses
+    "AnalysisResult",
+    "CachedAnalyticsProperty",
+    "VulnerabilityIdentity",
+    "VulnerabilityState",
+    "ArrayState",
+    "ArrayTimestamps",
+    "ArrayIdentifiers",
+    "ArrayCVDAnalytics",
+    # Helper functions
+    "compute_pair_mask",
+    "compute_history_id",
+]
+
+# ==================== CVSS SCORING ====================
+
+
+@dataclass(frozen=True)
+class CVSSScore:
+    """Single CVSS score from a specific source.
+
+    Attributes:
+        version: CVSS version (2.0, 3.0, 3.1, 4.0).
+        base_score: Base score (0.0-10.0).
+        vector: Raw CVSS vector string.
+        source: Source identifier (e.g., 'nvd', 'vendor').
+        source_status: Status from source (e.g., 'Analyzed', 'Modified').
+        reserved_at: When CVE ID was reserved.
+        published_at: When vulnerability was published.
+        updated_at: When record was last updated.
+        temporal_score: Optional temporal score.
+        environmental_score: Optional environmental score.
+    """
+
+    version: float
+    base_score: float
+    vector: str
+    source: str
+    source_status: Optional[str]
+    reserved_at: Optional[datetime]
+    published_at: Optional[datetime]
+    updated_at: Optional[datetime]
+    temporal_score: Optional[float]
+    environmental_score: Optional[float]
+
+    def parse_vector(self) -> dict[str, str]:
+        """Parse CVSS vector string into metrics dict.
+
+        Returns:
+            Dict mapping metric abbreviations to values.
+            E.g., {'AV': 'N', 'AC': 'L', 'C': 'H', ...}
+        """
+        result: dict[str, str] = {}
+        # Handle v2, v3.0, v3.1, v4.0 prefixes
+        vector = self.vector
+        for prefix in ("CVSS:4.0/", "CVSS:3.1/", "CVSS:3.0/", "CVSS:2.0/"):
+            vector = vector.replace(prefix, "")
+
+        parts = vector.split("/")
+        for part in parts:
+            if ":" in part:
+                key, value = part.split(":", 1)
+                result[key] = value
+        return result
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to dict, omitting None values."""
+        d: dict[str, Any] = {
+            "version": self.version,
+            "base_score": self.base_score,
+            "vector": self.vector,
+            "source": self.source,
+        }
+        if self.source_status is not None:
+            d["source_status"] = self.source_status
+        if self.reserved_at is not None:
+            d["reserved_at"] = self.reserved_at.isoformat()
+        if self.published_at is not None:
+            d["published_at"] = self.published_at.isoformat()
+        if self.updated_at is not None:
+            d["updated_at"] = self.updated_at.isoformat()
+        if self.temporal_score is not None:
+            d["temporal_score"] = self.temporal_score
+        if self.environmental_score is not None:
+            d["environmental_score"] = self.environmental_score
+        return d
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "CVSSScore":
+        """Deserialize from dict.
+
+        Args:
+            d: Dict with required keys (version, base_score, vector, source)
+               and optional keys for other fields.
+
+        Returns:
+            CVSSScore instance.
+        """
+        return cls(
+            version=d["version"],
+            base_score=d["base_score"],
+            vector=d["vector"],
+            source=d["source"],
+            source_status=d.get("source_status"),
+            reserved_at=(
+                datetime.fromisoformat(d["reserved_at"]) if d.get("reserved_at") else None
+            ),
+            published_at=(
+                datetime.fromisoformat(d["published_at"]) if d.get("published_at") else None
+            ),
+            updated_at=(datetime.fromisoformat(d["updated_at"]) if d.get("updated_at") else None),
+            temporal_score=d.get("temporal_score"),
+            environmental_score=d.get("environmental_score"),
+        )
+
+    @classmethod
+    def from_raw(
+        cls,
+        version: float,
+        base_score: float,
+        vector: str,
+        source: str,
+        source_status: Optional[str] = None,
+        reserved_at: Optional[datetime] = None,
+        published_at: Optional[datetime] = None,
+        updated_at: Optional[datetime] = None,
+        temporal_score: Optional[float] = None,
+        environmental_score: Optional[float] = None,
+    ) -> "CVSSScore":
+        """Create from raw data (lazy metrics parsing)."""
+        return cls(
+            version=version,
+            base_score=base_score,
+            vector=vector,
+            source=source,
+            source_status=source_status,
+            reserved_at=reserved_at,
+            published_at=published_at,
+            updated_at=updated_at,
+            temporal_score=temporal_score,
+            environmental_score=environmental_score,
+        )
+
+    @classmethod
+    def from_stored(
+        cls,
+        version: float,
+        base_score: float,
+        vector: str,
+        source: str,
+        metrics: Optional[dict[str, str]] = None,
+        source_status: Optional[str] = None,
+        reserved_at: Optional[datetime] = None,
+        published_at: Optional[datetime] = None,
+        updated_at: Optional[datetime] = None,
+        temporal_score: Optional[float] = None,
+        environmental_score: Optional[float] = None,
+    ) -> "CVSSScore":
+        """Create from stored data (pre-parsed metrics available)."""
+        # Note: metrics parameter is accepted but not stored (frozen dataclass)
+        # Future: could cache parsed metrics in a non-frozen version
+        return cls(
+            version=version,
+            base_score=base_score,
+            vector=vector,
+            source=source,
+            source_status=source_status,
+            reserved_at=reserved_at,
+            published_at=published_at,
+            updated_at=updated_at,
+            temporal_score=temporal_score,
+            environmental_score=environmental_score,
+        )
+
+
+@dataclass(frozen=True)
+class EPSSScore:
+    """Single EPSS score snapshot."""
+
+    model: int
+    probability: float
+    percentile: float
+    computed_at: Optional[datetime]
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {
+            "model": self.model,
+            "probability": self.probability,
+            "percentile": self.percentile,
+        }
+        if self.computed_at is not None:
+            d["computed_at"] = self.computed_at.isoformat()
+        return d
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "EPSSScore":
+        return cls(
+            model=d["model"],
+            probability=d["probability"],
+            percentile=d["percentile"],
+            computed_at=datetime.fromisoformat(d["computed_at"]) if d.get("computed_at") else None,
+        )
+
+
+@dataclass(frozen=True)
+class CWEEntry:
+    """CWE weakness entry with source attribution (legacy)."""
+
+    id: str
+    source: Optional[str]
+    primary: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"id": self.id, "primary": self.primary}
+        if self.source is not None:
+            d["source"] = self.source
+        return d
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "CWEEntry":
+        return cls(id=d["id"], source=d.get("source"), primary=d.get("primary", True))
+
+
+@dataclass(frozen=True)
+class CWE:
+    """CWE weakness with full metadata (API v2)."""
+
+    id: str
+    name: str = ""
+    category_id: str = ""
+    category_name: str = ""
+    keywords: tuple[str, ...] = ()
+    source: Optional[str] = None
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"id": self.id}
+        if self.name:
+            d["name"] = self.name
+        if self.category_id:
+            d["category_id"] = self.category_id
+        if self.category_name:
+            d["category_name"] = self.category_name
+        if self.keywords:
+            d["keywords"] = list(self.keywords)
+        if self.source:
+            d["source"] = self.source
+        return d
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "CWE":
+        return cls(
+            id=d["id"],
+            name=d.get("name", ""),
+            category_id=d.get("category_id", ""),
+            category_name=d.get("category_name", ""),
+            keywords=tuple(d.get("keywords", [])),
+            source=d.get("source"),
+        )
+
+
+@dataclass(frozen=True)
+class CPE:
+    """Parsed CPE 2.3 identifier."""
+
+    raw: str
+    part: str  # 'a' (application), 'o' (OS), 'h' (hardware)
+    vendor: str
+    product: str
+    version: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "raw": self.raw,
+            "part": self.part,
+            "vendor": self.vendor,
+            "product": self.product,
+            "version": self.version,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "CPE":
+        return cls(
+            raw=d["raw"],
+            part=d["part"],
+            vendor=d["vendor"],
+            product=d["product"],
+            version=d["version"],
+        )
+
+    @classmethod
+    def parse(cls, cpe_string: str) -> "CPE":
+        """Parse CPE 2.3 formatted string."""
+        # cpe:2.3:a:vendor:product:version:...
+        parts = cpe_string.split(":")
+        if len(parts) >= 5:
+            part_char = parts[2] if len(parts) > 2 else "a"
+            part_map = {"a": "application", "o": "os", "h": "hardware"}
+            return cls(
+                raw=cpe_string,
+                part=part_map.get(part_char, part_char),
+                vendor=parts[3] if len(parts) > 3 else "",
+                product=parts[4] if len(parts) > 4 else "",
+                version=parts[5] if len(parts) > 5 else "",
+            )
+        return cls(raw=cpe_string, part="", vendor="", product="", version="")
+
+
+@dataclass(frozen=True)
+class KEVEntry:
+    """CISA Known Exploited Vulnerabilities catalog entry (legacy)."""
+
+    added_at: datetime
+    due_date: Optional[datetime]
+    required_action: Optional[str]
+    ransomware_use: Optional[bool]
+    notes: Optional[str]
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"added_at": self.added_at.isoformat()}
+        if self.due_date is not None:
+            d["due_date"] = self.due_date.isoformat()
+        if self.required_action is not None:
+            d["required_action"] = self.required_action
+        if self.ransomware_use is not None:
+            d["ransomware_use"] = self.ransomware_use
+        if self.notes is not None:
+            d["notes"] = self.notes
+        return d
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "KEVEntry":
+        return cls(
+            added_at=datetime.fromisoformat(d["added_at"]),
+            due_date=datetime.fromisoformat(d["due_date"]) if d.get("due_date") else None,
+            required_action=d.get("required_action"),
+            ransomware_use=d.get("ransomware_use"),
+            notes=d.get("notes"),
+        )
+
+
+@dataclass(frozen=True)
+class KEV:
+    """CISA Known Exploited Vulnerability with full metadata (API v2)."""
+
+    vendor: str
+    product: str
+    vulnerability_name: str
+    added_at: datetime
+    due_date: Optional[datetime] = None
+    known_ransomware_use: bool = False
+    notes: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {
+            "vendor": self.vendor,
+            "product": self.product,
+            "vulnerability_name": self.vulnerability_name,
+            "added_at": self.added_at.isoformat(),
+        }
+        if self.due_date:
+            d["due_date"] = self.due_date.isoformat()
+        if self.known_ransomware_use:
+            d["known_ransomware_use"] = True
+        if self.notes:
+            d["notes"] = self.notes
+        return d
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "KEV":
+        return cls(
+            vendor=d["vendor"],
+            product=d["product"],
+            vulnerability_name=d["vulnerability_name"],
+            added_at=datetime.fromisoformat(d["added_at"]),
+            due_date=datetime.fromisoformat(d["due_date"]) if d.get("due_date") else None,
+            known_ransomware_use=d.get("known_ransomware_use", False),
+            notes=d.get("notes", ""),
+        )
+
+
+@dataclass(frozen=True)
+class ExploitReference:
+    """Reference to known exploit code."""
+
+    source: str
+    reference: str
+    metadata: Optional[dict[str, Any]]
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"source": self.source, "reference": self.reference}
+        if self.metadata is not None:
+            d["metadata"] = self.metadata
+        return d
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "ExploitReference":
+        return cls(source=d["source"], reference=d["reference"], metadata=d.get("metadata"))
+
+
+@dataclass(frozen=True)
+class ScoreResult:
+    """Computed scores from ScoreExtractor.apply_single()."""
+
+    cvss_score: Optional[float]
+    cvss_max: Optional[float]
+    epss_probability: Optional[float]
+    epss_percentile: Optional[float]
+    kev: bool
+    has_exploit: bool
+    cwe_count: int
+    cpe_count: int
+    vendors: set[str]
+    products: set[str]
+
+
+@dataclass(frozen=True)
+class AnalyticsResult:
+    """Computed analytics from CVDStateAnalyzer.apply_single()."""
+
+    fix_path: FixPath
+    threat_state: ThreatState
+    is_zero_day: bool
+    is_zero_day_exploit: bool
+    is_zero_day_attack: bool
+    is_coordinated: bool
+    is_premature_disclosure: bool
+    is_responsible_disclosure: bool
+    has_fix_before_exploit: bool
+    has_fix_before_attack: bool
+    is_private_attack: bool
+    is_weaponized: bool
+    is_mass_exploitation: bool
+    is_fix_available: bool
+    is_fix_deployed: bool
+    is_under_attack: bool
+    fix_lag_days: Optional[float]
+
+
+@dataclass
+class ArraySource:
+    """Source of truth - object arrays for CVDArray."""
+
+    cvss_scores: np.ndarray  # object[N], each is list[CVSSScore]
+    epss_scores: np.ndarray  # object[N], each is list[EPSSScore]
+    cwes: np.ndarray  # object[N], each is list[CWEEntry]
+    cpes: np.ndarray  # object[N], each is list[str]
+    kev: np.ndarray  # object[N], each is KEVEntry | None
+    exploits: np.ndarray  # object[N], each is list[ExploitReference]
+
+    def __getitem__(self, key: Any) -> "ArraySource":
+        """Slice all arrays consistently."""
+        return ArraySource(
+            cvss_scores=self.cvss_scores[key],
+            epss_scores=self.epss_scores[key],
+            cwes=self.cwes[key],
+            cpes=self.cpes[key],
+            kev=self.kev[key],
+            exploits=self.exploits[key],
+        )
+
 
 # ==================== PROPERTY DESCRIPTORS ====================
 
@@ -65,14 +546,6 @@ class CachedAnalyticsProperty:
 
 
 @dataclass
-class EventMetadata:
-    """Metadata for a single event occurrence."""
-
-    actor: Optional[str] = None
-    notes: Optional[str] = None
-
-
-@dataclass
 class VulnerabilityIdentity:
     """Identity information for a vulnerability.
 
@@ -83,49 +556,6 @@ class VulnerabilityIdentity:
 
     vuln_id: str = field(default_factory=lambda: str(uuid4()))
     cve_id: Optional[str] = None
-
-
-@dataclass
-class VulnerabilityScoring:
-    """CVSS scoring data (supports 2.0, 3.0, 3.1, 4.0)."""
-
-    # CVSS version (2.0, 3.0, 3.1, 4.0) - default 3.1
-    cvss_version: Optional[str] = None
-
-    # Raw CVSS vector string (e.g., 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H')
-    cve_vector: Optional[str] = None
-
-    # CVSS Scores
-    cvss_base_score: Optional[float] = None
-    cvss_exploitability_score: Optional[float] = None  # Computed from AV, AC, PR, UI
-    cvss_impact_score: Optional[float] = None  # Computed from C, I, A (and S for 3.x)
-    cvss_temporal_score: Optional[float] = None
-    cvss_environmental_score: Optional[float] = None
-
-    # CVSS 3.x Base Metrics (parsed from cve_vector)
-    attack_vector: Optional[str] = None  # N (Network), A (Adjacent), L (Local), P (Physical)
-    attack_complexity: Optional[str] = None  # L (Low), H (High)
-    privileges_required: Optional[str] = None  # N (None), L (Low), H (High)
-    user_interaction: Optional[str] = None  # N (None), R (Required)
-    scope: Optional[str] = None  # U (Unchanged), C (Changed)
-    confidentiality_impact: Optional[str] = None  # N (None), L (Low), H (High)
-    integrity_impact: Optional[str] = None  # N (None), L (Low), H (High)
-    availability_impact: Optional[str] = None  # N (None), L (Low), H (High)
-
-    # CVSS 3.x Temporal Metrics (optional, parsed from cve_vector)
-    exploit_code_maturity: Optional[str] = None  # X, U, P, F, H
-    remediation_level: Optional[str] = None  # X, O, T, W, U
-    report_confidence: Optional[str] = None  # X, U, R, C
-
-
-@dataclass
-class VulnerabilityEnrichment:
-    """External enrichment data from EPSS, KEV, NVD, etc."""
-
-    epss: Optional[float] = None  # Exploit Prediction Scoring System (0.0-1.0)
-    epss_percentile: Optional[float] = None  # EPSS percentile (0.0-1.0)
-    kev: bool = False  # CISA Known Exploited Vulnerabilities flag
-    kev_date: Optional[datetime] = None  # Date added to KEV catalog
 
 
 @dataclass
@@ -217,71 +647,6 @@ class ArrayIdentifiers:
 
 
 @dataclass
-class ArrayScoring:
-    """CVSS scoring data arrays (supports 2.0, 3.0, 3.1, 4.0)."""
-
-    # CVSS version (object dtype for string '2.0', '3.0', '3.1', '4.0')
-    cvss_version: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
-
-    # CVSS Scores
-    cvss_score: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
-    cvss_exploitability_score: np.ndarray = field(
-        default_factory=lambda: np.array([], dtype=np.float32)
-    )
-    cvss_impact_score: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
-
-    # Raw CVSS vector strings (for lazy metric parsing)
-    cve_vector: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
-
-    # CVSS 3.x Base Metrics (parsed from cve_vector lazily)
-    attack_vector: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
-    attack_complexity: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
-    privileges_required: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
-    user_interaction: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
-    scope: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
-    confidentiality_impact: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
-    integrity_impact: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
-    availability_impact: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
-
-    def __getitem__(self, key: Any) -> "ArrayScoring":
-        """Slice all arrays consistently."""
-        return ArrayScoring(
-            cvss_version=self.cvss_version[key],
-            cvss_score=self.cvss_score[key],
-            cvss_exploitability_score=self.cvss_exploitability_score[key],
-            cvss_impact_score=self.cvss_impact_score[key],
-            cve_vector=self.cve_vector[key],
-            attack_vector=self.attack_vector[key],
-            attack_complexity=self.attack_complexity[key],
-            privileges_required=self.privileges_required[key],
-            user_interaction=self.user_interaction[key],
-            scope=self.scope[key],
-            confidentiality_impact=self.confidentiality_impact[key],
-            integrity_impact=self.integrity_impact[key],
-            availability_impact=self.availability_impact[key],
-        )
-
-
-@dataclass
-class ArrayEnrichment:
-    """EPSS and KEV enrichment data arrays."""
-
-    epss: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
-    epss_percentile: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
-    kev: np.ndarray = field(default_factory=lambda: np.array([], dtype=bool))
-    kev_date: np.ndarray = field(default_factory=lambda: np.array([], dtype="datetime64[s]"))
-
-    def __getitem__(self, key: Any) -> "ArrayEnrichment":
-        """Slice all arrays consistently."""
-        return ArrayEnrichment(
-            epss=self.epss[key],
-            epss_percentile=self.epss_percentile[key],
-            kev=self.kev[key],
-            kev_date=self.kev_date[key],
-        )
-
-
-@dataclass
 class ArrayCVDAnalytics:
     """
     Precomputed bitmasks for fast vectorized queries.
@@ -326,29 +691,8 @@ class ArrayCVDAnalytics:
 
 
 @dataclass
-class ArrayProbabilities:
-    """Flexible probability inputs. NaN = not set."""
-
-    base_threat: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
-    xa_split_ratio: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
-    threat_multiplier: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
-    override_X: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
-    override_A: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
-
-    def __getitem__(self, key: Any) -> "ArrayProbabilities":
-        """Slice all arrays consistently."""
-        return ArrayProbabilities(
-            base_threat=self.base_threat[key],
-            xa_split_ratio=self.xa_split_ratio[key],
-            threat_multiplier=self.threat_multiplier[key],
-            override_X=self.override_X[key],
-            override_A=self.override_A[key],
-        )
-
-
-@dataclass
 class AnalysisResult:
-    """All computed analytics from CVDAnalyzer (Groups 1-11)."""
+    """All computed analytics from DesiderataExtractor (Groups 1-11)."""
 
     # Group 1: Validity & Completeness
     validity_int: np.ndarray  # uint8[N]
@@ -586,47 +930,6 @@ class AnalysisResult:
 
 
 @dataclass
-class ArrayAnalytics:
-    """Cached analytics arrays (15 analytics fields)."""
-
-    # Categorical fields
-    severities: np.ndarray = field(default_factory=lambda: np.array([], dtype=object))
-    fix_path: np.ndarray = field(
-        default_factory=lambda: np.array([], dtype=np.uint8)
-    )  # FixPath enum values
-    threat_state: np.ndarray = field(
-        default_factory=lambda: np.array([], dtype=np.uint8)
-    )  # ThreatState enum values
-
-    # Boolean flags
-    is_zero_day: np.ndarray = field(default_factory=lambda: np.array([], dtype=bool))
-    is_fix_available: np.ndarray = field(default_factory=lambda: np.array([], dtype=bool))
-    is_fix_deployed: np.ndarray = field(default_factory=lambda: np.array([], dtype=bool))
-    is_weaponized: np.ndarray = field(default_factory=lambda: np.array([], dtype=bool))
-    is_under_attack: np.ndarray = field(default_factory=lambda: np.array([], dtype=bool))
-    is_premature_disclosure: np.ndarray = field(default_factory=lambda: np.array([], dtype=bool))
-
-    # Numeric metrics (float32 for memory efficiency)
-    disclosure_window_days: np.ndarray = field(
-        default_factory=lambda: np.array([], dtype=np.float32)
-    )
-    fix_lag_days: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
-    deployment_lag_days: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
-    desiderata_score: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
-
-    # Bitmask fields (uint16 for 12 bits)
-    desiderata_mask: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.uint16))
-    anti_desiderata_mask: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.uint16))
-
-    skill_score: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
-
-    # Integer count
-    violated_orderings_count: np.ndarray = field(
-        default_factory=lambda: np.array([], dtype=np.int32)
-    )
-
-
-@dataclass
 class ArrayMetadata:
     """Metadata and backward compatibility fields."""
 
@@ -775,3 +1078,31 @@ def compute_history_id(state: ArrayState, timestamps: ArrayTimestamps) -> np.nda
         # else: remains 255 (invalid history - should not happen with valid data)
 
     return result
+
+
+@dataclass
+class CVSSMetrics:
+    """Parsed CVSS vector metrics for batch operations."""
+
+    attack_vector: np.ndarray  # dtype=object, values: "N", "A", "L", "P" or None
+    attack_complexity: np.ndarray
+    privileges_required: np.ndarray
+    user_interaction: np.ndarray
+    scope: np.ndarray
+    confidentiality_impact: np.ndarray
+    integrity_impact: np.ndarray
+    availability_impact: np.ndarray
+
+    @classmethod
+    def empty(cls, n: int) -> "CVSSMetrics":
+        """Create empty metrics arrays of length n."""
+        return cls(
+            attack_vector=np.empty(n, dtype=object),
+            attack_complexity=np.empty(n, dtype=object),
+            privileges_required=np.empty(n, dtype=object),
+            user_interaction=np.empty(n, dtype=object),
+            scope=np.empty(n, dtype=object),
+            confidentiality_impact=np.empty(n, dtype=object),
+            integrity_impact=np.empty(n, dtype=object),
+            availability_impact=np.empty(n, dtype=object),
+        )

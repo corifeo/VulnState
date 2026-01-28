@@ -34,6 +34,8 @@ if TYPE_CHECKING:
     from .vulnerability import CVDVulnerability
 
 from .constants import CVDEvent
+from .models import CVSSScore, CWEEntry
+from .transforms import parse_cpe
 
 
 class NVDParser:
@@ -403,12 +405,150 @@ class NVDParser:
 
         for cpe in cpe_strings:
             parsed = parse_cpe(cpe)
-            if parsed["vendor_id"]:
-                vendors.add(parsed["vendor_id"])
-            if parsed["product_id"]:
-                products.add(parsed["product_id"])
+            if parsed["vendor"]:
+                vendors.add(parsed["vendor"])
+            if parsed["product"]:
+                products.add(parsed["product"])
 
         return sorted(vendors), sorted(products)
+
+    @staticmethod
+    def extract_cvss_scores(item: dict[str, Any], format_version: str) -> list[CVSSScore]:
+        """
+        Extract all CVSS scores as CVSSScore objects from NVD item.
+
+        Supports CVSS v4.0, v3.1, v3.0, and v2.0 metrics.
+
+        Args:
+            item: NVD vulnerability item
+            format_version: "1.1" or "2.0"
+
+        Returns:
+            List of CVSSScore objects (may be empty)
+        """
+        cvss_scores: list[CVSSScore] = []
+
+        if format_version == "2.0":
+            metrics = item.get("cve", {}).get("metrics", {})
+
+            # Process all CVSS metric versions
+            metric_versions = [
+                ("cvssMetricV40", 4.0),
+                ("cvssMetricV31", 3.1),
+                ("cvssMetricV30", 3.0),
+                ("cvssMetricV2", 2.0),
+            ]
+
+            for metric_key, default_version in metric_versions:
+                for metric in metrics.get(metric_key, []):
+                    cvss_data = metric.get("cvssData", {})
+
+                    # Parse version from data or use default
+                    version_str = cvss_data.get("version", str(default_version))
+                    try:
+                        version = float(version_str)
+                    except (ValueError, TypeError):
+                        version = default_version
+
+                    cvss_scores.append(
+                        CVSSScore(
+                            version=version,
+                            base_score=cvss_data.get("baseScore", 0.0),
+                            vector=cvss_data.get("vectorString", ""),
+                            source=metric.get("source", "unknown"),
+                            source_status=None,
+                            reserved_at=None,
+                            published_at=None,
+                            updated_at=None,
+                            temporal_score=None,
+                            environmental_score=None,
+                        )
+                    )
+
+        else:
+            # NVD 1.1 format
+            impact = item.get("impact", {})
+
+            # CVSS v3
+            if "baseMetricV3" in impact:
+                base_metric = impact["baseMetricV3"]
+                cvss_v3 = base_metric.get("cvssV3", {})
+                cvss_scores.append(
+                    CVSSScore(
+                        version=3.0,
+                        base_score=cvss_v3.get("baseScore", 0.0),
+                        vector=cvss_v3.get("vectorString", ""),
+                        source="nvd@nist.gov",
+                        source_status=None,
+                        reserved_at=None,
+                        published_at=None,
+                        updated_at=None,
+                        temporal_score=None,
+                        environmental_score=None,
+                    )
+                )
+
+            # CVSS v2
+            if "baseMetricV2" in impact:
+                base_metric = impact["baseMetricV2"]
+                cvss_v2 = base_metric.get("cvssV2", {})
+                cvss_scores.append(
+                    CVSSScore(
+                        version=2.0,
+                        base_score=cvss_v2.get("baseScore", 0.0),
+                        vector=cvss_v2.get("vectorString", ""),
+                        source="nvd@nist.gov",
+                        source_status=None,
+                        reserved_at=None,
+                        published_at=None,
+                        updated_at=None,
+                        temporal_score=None,
+                        environmental_score=None,
+                    )
+                )
+
+        return cvss_scores
+
+    @staticmethod
+    def extract_cwe_entries(item: dict[str, Any], format_version: str) -> list[CWEEntry]:
+        """
+        Extract CWE entries as CWEEntry objects from NVD item.
+
+        Skips NVD-CWE-Other and NVD-CWE-noinfo entries as they don't provide
+        actionable weakness information.
+
+        Args:
+            item: NVD vulnerability item
+            format_version: "1.1" or "2.0"
+
+        Returns:
+            List of CWEEntry objects (may be empty)
+        """
+        cwe_entries: list[CWEEntry] = []
+
+        if format_version == "2.0":
+            weaknesses = item.get("cve", {}).get("weaknesses", [])
+            for weakness in weaknesses:
+                source = weakness.get("source")
+                is_primary = weakness.get("type") == "Primary"
+                for desc in weakness.get("description", []):
+                    if desc.get("lang") != "en":
+                        continue
+                    cwe_id = desc.get("value", "")
+                    # Skip NVD placeholder CWEs
+                    if cwe_id.startswith("CWE-") and not cwe_id.startswith("CWE-noinfo"):
+                        cwe_entries.append(CWEEntry(id=cwe_id, source=source, primary=is_primary))
+        else:
+            # NVD 1.1 format
+            problem_types = item.get("cve", {}).get("problemtype", {}).get("problemtype_data", [])
+            for pt in problem_types:
+                for desc in pt.get("description", []):
+                    cwe_id = desc.get("value", "")
+                    # Skip NVD placeholder CWEs
+                    if cwe_id.startswith("CWE-") and not cwe_id.startswith("CWE-noinfo"):
+                        cwe_entries.append(CWEEntry(id=cwe_id, source="nvd@nist.gov", primary=True))
+
+        return cwe_entries
 
     @staticmethod
     def extract_severity(item: dict[str, Any], format_version: str) -> Optional[str]:
@@ -511,13 +651,43 @@ class NVDParser:
         cvss_score, cvss_vector, exploitability, impact = NVDParser.extract_cvss(
             item, format_version
         )
-        vuln.cvss_score = cvss_score
-        vuln.cve_vector = cvss_vector
-        vuln.scoring.cvss_exploitability_score = exploitability
-        vuln.scoring.cvss_impact_score = impact
+        # Use list-based approach - create CVSSScore if we have a score
+        if cvss_score is not None:
+            from .models import CVSSScore
 
-        # Extract ALL CPEs (vendors/products parsed lazily during export)
+            vuln.cvss_scores.append(
+                CVSSScore(
+                    version=3.1,
+                    base_score=cvss_score,
+                    vector=cvss_vector or "",
+                    source="nvd",
+                    source_status=None,
+                    reserved_at=None,
+                    published_at=None,
+                    updated_at=None,
+                    temporal_score=None,
+                    environmental_score=None,
+                )
+            )
+        vuln.cve_vector = cvss_vector
+        # Store sub-scores in metadata (no longer have scoring dataclass)
+        if exploitability is not None:
+            vuln.metadata["cvss_exploitability_score"] = exploitability
+        if impact is not None:
+            vuln.metadata["cvss_impact_score"] = impact
+
+        # Extract API v2 enrichment fields
+        # CVSS scores (list of CVSSScore objects)
+        vuln.cvss_scores = NVDParser.extract_cvss_scores(item, format_version)
+
+        # CWE entries (list of CWEEntry objects)
+        vuln.cwes = NVDParser.extract_cwe_entries(item, format_version)
+
+        # CPE strings (list of CPE 2.3 URIs)
         cpe_strings = NVDParser.extract_all_cpes(item, format_version)
+        vuln.cpes = cpe_strings
+
+        # Also store in metadata for backward compatibility
         if cpe_strings:
             vuln.metadata["cpe_strings"] = cpe_strings
 
@@ -823,10 +993,44 @@ class NVDParser:
                         item, format_version
                     )
                     if cvss_score is not None:
-                        vuln.cvss_score = cvss_score
+                        # Use list-based approach for cvss_score
+                        from .models import CVSSScore
+
+                        if vuln.cvss_scores:
+                            # Replace first score
+                            vuln.cvss_scores[0] = CVSSScore(
+                                version=3.1,
+                                base_score=cvss_score,
+                                vector=cvss_vector or "",
+                                source="nvd",
+                                source_status=None,
+                                reserved_at=None,
+                                published_at=None,
+                                updated_at=None,
+                                temporal_score=None,
+                                environmental_score=None,
+                            )
+                        else:
+                            vuln.cvss_scores.append(
+                                CVSSScore(
+                                    version=3.1,
+                                    base_score=cvss_score,
+                                    vector=cvss_vector or "",
+                                    source="nvd",
+                                    source_status=None,
+                                    reserved_at=None,
+                                    published_at=None,
+                                    updated_at=None,
+                                    temporal_score=None,
+                                    environmental_score=None,
+                                )
+                            )
                         vuln.cve_vector = cvss_vector
-                        vuln.scoring.cvss_exploitability_score = exploitability
-                        vuln.scoring.cvss_impact_score = impact
+                        # Store sub-scores in metadata
+                        if exploitability is not None:
+                            vuln.metadata["cvss_exploitability_score"] = exploitability
+                        if impact is not None:
+                            vuln.metadata["cvss_impact_score"] = impact
                         # Update metadata arrays
                         if "cvss_score" in arr._metadata_raw:
                             arr._metadata_raw["cvss_score"][idx] = cvss_score
@@ -978,57 +1182,6 @@ class NVDParser:
             vulns.append(vuln)
 
         return CVDArray(vulns)
-
-
-def parse_cpe(cpe_string: Optional[str]) -> dict[str, Optional[str]]:
-    """
-    Parse CPE 2.3 string to extract vendor and product identifiers.
-
-    CPE 2.3 format: cpe:2.3:part:vendor:product:version:update:edition:language:sw_edition:target_sw:target_hw:other
-
-    Args:
-        cpe_string: CPE 2.3 formatted string or None
-
-    Returns:
-        Dict with 'vendor_id' and 'product_id' keys (values may be None)
-
-    Examples:
-        >>> parse_cpe('cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*')
-        {'vendor_id': 'apache', 'product_id': 'log4j'}
-
-        >>> parse_cpe('cpe:2.3:o:microsoft:windows_10:*:*:*:*:*:*:*:*')
-        {'vendor_id': 'microsoft', 'product_id': 'windows_10'}
-
-        >>> parse_cpe(None)
-        {'vendor_id': None, 'product_id': None}
-    """
-    result: dict[str, Optional[str]] = {"vendor_id": None, "product_id": None}
-
-    if not cpe_string or not isinstance(cpe_string, str):
-        return result
-
-    try:
-        # CPE 2.3 format: cpe:2.3:part:vendor:product:version:...
-        parts = cpe_string.split(":")
-
-        # Validate CPE 2.3 format
-        if len(parts) < 5 or parts[0] != "cpe" or parts[1] != "2.3":
-            return result
-
-        vendor = parts[3] if len(parts) > 3 else None
-        product = parts[4] if len(parts) > 4 else None
-
-        # Filter out wildcards and empty values
-        if vendor and vendor not in ("*", "-", ""):
-            result["vendor_id"] = vendor
-        if product and product not in ("*", "-", ""):
-            result["product_id"] = product
-
-    except Exception:
-        # Invalid format, return None values
-        pass
-
-    return result
 
 
 def extract_cpe_from_configurations(configurations: list[dict[str, Any]]) -> Optional[str]:

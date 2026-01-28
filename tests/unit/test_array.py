@@ -29,11 +29,15 @@ class TestBatchCreation:
         assert len(arr) == 0
 
     def test_create_with_metadata(self):
-        """Verify array preserves metadata."""
+        """Verify array preserves CVSS scores via API v2 structure."""
         vulns = [CVDVulnerability(f"V{i}", cvss_score=5.0 + i) for i in range(3)]
         arr = CVDArray(vulns)
+        arr.transform()  # Required before accessing computed properties
 
-        assert "cvss_score" in arr.metadata
+        # CVSS scores are now accessed via computed property (API v2)
+        scores = arr.cvss_scores
+        assert len(scores) == 3
+        assert not np.isnan(scores[0])  # Should have a score
 
     def test_states_stored_as_uint8(self):
         """Verify states are stored as uint8."""
@@ -157,19 +161,6 @@ class TestVectorizedQueries:
         assert counts["Vfdpxa"] == 2
         assert counts["vfdpxa"] == 1
 
-    def test_event_occurrence_counts(self):
-        """Verify event occurrence counting."""
-        vulns = [CVDVulnerability(f"V{i}") for i in range(5)]
-
-        for i in range(3):
-            vulns[i].apply_event(CVDEvent.V)
-
-        arr = CVDArray(vulns)
-        counts = arr.event_occurrence_counts
-
-        assert counts["V"] == 3
-        assert counts["F"] == 0
-
     def test_event_occurrence_rates(self):
         """Verify event occurrence rate calculation."""
         vulns = [CVDVulnerability(f"V{i}") for i in range(4)]
@@ -249,68 +240,6 @@ class TestBatchEventApplication:
         assert arr.has_event_occurred(CVDEvent.D).all()
 
 
-class TestMLIntegration:
-    """Test ML matrix conversions."""
-
-    def test_to_matrix_shape(self):
-        """Verify to_matrix output shape."""
-        vulns = [CVDVulnerability(f"V{i}") for i in range(5)]
-        arr = CVDArray(vulns)
-
-        matrix = arr.to_matrix()
-
-        assert matrix.shape == (5, 6)
-        assert matrix.dtype == np.uint8
-
-    def test_to_matrix_values(self):
-        """Verify to_matrix encodes correctly."""
-        vulns = [CVDVulnerability("V1"), CVDVulnerability("V2")]
-        vulns[0].apply_event(CVDEvent.V)
-        vulns[0].apply_event(CVDEvent.P)
-        vulns[1].apply_event(CVDEvent.F)
-
-        arr = CVDArray(vulns)
-        matrix = arr.to_matrix()
-
-        # V1 has V and P
-        assert matrix[0, 0] == 1  # V
-        assert matrix[0, 3] == 1  # P
-        # V2 has F but it's invalid (needs V first), so should be 0
-        assert matrix[1, 1] == 0  # F not applied
-
-    def test_from_matrix_creation(self):
-        """Verify from_matrix creates valid array."""
-        matrix = np.array(
-            [
-                [1, 1, 0, 0, 0, 0],  # VFdpxa
-                [1, 0, 0, 1, 0, 0],  # VfdPxa
-                [0, 0, 0, 0, 0, 0],  # vfdpxa
-            ],
-            dtype=np.uint8,
-        )
-
-        arr = CVDArray.from_matrix(matrix, ["A", "B", "C"])
-
-        assert len(arr) == 3
-        assert arr[0].state_str == "VFdpxa"
-        assert arr[1].state_str == "VfdPxa"
-        assert arr[2].state_str == "vfdpxa"
-
-    def test_from_matrix_round_trip(self):
-        """Verify from_matrix→to_matrix round-trip."""
-        vulns = [CVDVulnerability("V1"), CVDVulnerability("V2"), CVDVulnerability("V3")]
-        vulns[0].apply_event(CVDEvent.V)
-        vulns[0].apply_event(CVDEvent.F)
-        vulns[1].apply_event(CVDEvent.P)
-        vulns[1].apply_event(CVDEvent.X)
-
-        original = CVDArray(vulns)
-        matrix = original.to_matrix()
-        recovered = CVDArray.from_matrix(matrix)
-
-        assert (original.to_matrix() == recovered.to_matrix()).all()
-
-
 class TestSummary:
     """Test summary generation."""
 
@@ -370,15 +299,19 @@ class TestDataPreservation:
         """Verify subset preserves array properties."""
         vulns = [CVDVulnerability(f"V{i}", cvss_score=5.0 + i) for i in range(5)]
         arr = CVDArray(vulns)
+        arr.transform()  # Required before accessing computed properties
 
         subset = arr[1:4]
+        subset.transform()  # Subset also needs transform
 
         assert len(subset) == 3
-        assert "cvss_score" in subset.metadata
+        # CVSS scores preserved in API v2 structure (_source)
+        scores = subset.cvss_scores
+        assert len(scores) == 3
 
 
 class TestAnalysisProperty:
-    """Test analysis property auto-triggers CVDAnalyzer."""
+    """Test analysis property auto-triggers DesiderataExtractor."""
 
     def test_analysis_returns_analysis_result(self):
         """Verify analysis property returns AnalysisResult."""
@@ -486,32 +419,77 @@ class TestMetadataArrays:
     @pytest.fixture
     def metadata_array(self):
         """Create array with various metadata."""
+        from datetime import datetime
+
+        from vulnstate.models import CVSSScore, EPSSScore, KEVEntry
+
         vuln1 = CVDVulnerability("CVE-2024-001")
-        vuln1.cvss_score = 9.8
-        vuln1.epss = 0.85
-        vuln1.kev = True
+        vuln1.cvss_scores.append(
+            CVSSScore(
+                version=3.1,
+                base_score=9.8,
+                vector="",
+                source="test",
+                source_status=None,
+                reserved_at=None,
+                published_at=None,
+                updated_at=None,
+                temporal_score=None,
+                environmental_score=None,
+            )
+        )
+        vuln1.epss_scores.append(
+            EPSSScore(model=4, probability=0.85, percentile=0.0, computed_at=None)
+        )
+        vuln1.kev_entry = KEVEntry(
+            added_at=datetime.now(),
+            due_date=None,
+            required_action=None,
+            ransomware_use=None,
+            notes=None,
+        )
 
         vuln2 = CVDVulnerability("CVE-2024-002")
-        vuln2.cvss_score = 4.3
-        vuln2.epss = 0.12
-        vuln2.kev = False
+        vuln2.cvss_scores.append(
+            CVSSScore(
+                version=3.1,
+                base_score=4.3,
+                vector="",
+                source="test",
+                source_status=None,
+                reserved_at=None,
+                published_at=None,
+                updated_at=None,
+                temporal_score=None,
+                environmental_score=None,
+            )
+        )
+        vuln2.epss_scores.append(
+            EPSSScore(model=4, probability=0.12, percentile=0.0, computed_at=None)
+        )
+        # vuln2.kev is False by default (no kev_entry)
 
-        return CVDArray([vuln1, vuln2])
+        arr = CVDArray([vuln1, vuln2])
+        arr.transform()  # Required before accessing computed properties
+        return arr
 
     def test_cvss_score_dtype(self, metadata_array):
-        """cvss_score stored as float32."""
-        cvss_arr = metadata_array._metadata_raw["cvss_score"]
+        """cvss_score computed property is float32."""
+        cvss_arr = metadata_array.cvss_scores
         assert cvss_arr.dtype == np.float32
+        assert len(cvss_arr) == 2
 
     def test_epss_dtype(self, metadata_array):
-        """epss stored as float32."""
-        epss_arr = metadata_array._metadata_raw["epss"]
+        """epss computed property is float32."""
+        epss_arr = metadata_array.epss
         assert epss_arr.dtype == np.float32
+        assert len(epss_arr) == 2
 
     def test_kev_dtype(self, metadata_array):
-        """kev stored as bool."""
-        kev_arr = metadata_array._metadata_raw["kev"]
+        """kev computed property is bool."""
+        kev_arr = metadata_array.kev
         assert kev_arr.dtype == np.bool_
+        assert len(kev_arr) == 2
 
     def test_cve_id_dtype(self, metadata_array):
         """CVE IDs stored as object (strings)."""
@@ -965,6 +943,7 @@ class TestNewAPIConsistencyProperties:
 
         arr = CVDArray([v])
         arr.sync()
+        arr.transform()
 
         assert arr.is_zero_day_exploit[0]
 
@@ -980,6 +959,7 @@ class TestNewAPIConsistencyProperties:
 
         arr = CVDArray([v])
         arr.sync()
+        arr.transform()
 
         assert arr.is_zero_day_attack[0]
 
@@ -995,6 +975,7 @@ class TestNewAPIConsistencyProperties:
 
         arr = CVDArray([v])
         arr.sync()
+        arr.transform()
 
         assert arr.is_coordinated[0]
 
@@ -1011,6 +992,7 @@ class TestNewAPIConsistencyProperties:
 
         arr = CVDArray([v])
         arr.sync()
+        arr.transform()
 
         assert arr.is_responsible_disclosure[0]
 
@@ -1027,6 +1009,7 @@ class TestNewAPIConsistencyProperties:
 
         arr = CVDArray([v])
         arr.sync()
+        arr.transform()
 
         assert arr.has_fix_before_exploit[0]
 
@@ -1043,6 +1026,7 @@ class TestNewAPIConsistencyProperties:
 
         arr = CVDArray([v])
         arr.sync()
+        arr.transform()
 
         assert arr.has_fix_before_attack[0]
 
@@ -1060,6 +1044,7 @@ class TestNewAPIConsistencyProperties:
 
         arr = CVDArray([v])
         arr.sync()
+        arr.transform()
 
         assert arr.has_deployment_before_exploit[0]
 
@@ -1077,6 +1062,7 @@ class TestNewAPIConsistencyProperties:
 
         arr = CVDArray([v])
         arr.sync()
+        arr.transform()
 
         assert arr.has_deployment_before_attack[0]
 
@@ -1092,6 +1078,7 @@ class TestNewAPIConsistencyProperties:
 
         arr = CVDArray([v])
         arr.sync()
+        arr.transform()
 
         assert arr.is_private_attack[0]
         assert not arr.is_weaponized[0]
@@ -1109,6 +1096,7 @@ class TestNewAPIConsistencyProperties:
 
         arr = CVDArray([v])
         arr.sync()
+        arr.transform()
 
         assert arr.is_mass_exploitation[0]
         assert arr.is_weaponized[0]
@@ -1119,6 +1107,7 @@ class TestNewAPIConsistencyProperties:
         v1 = CVDVulnerability("CVE-2024-001")
         v2 = CVDVulnerability("CVE-2024-002")
         arr = CVDArray([v1, v2])
+        arr.transform()
 
         props = [
             "is_zero_day_exploit",
@@ -1143,12 +1132,27 @@ class TestNewAPIConsistencyProperties:
 def test_cvss_properties():
     """Test CVSS metric properties."""
     from vulnstate import CVDArray, CVDVulnerability
+    from vulnstate.models import CVSSScore
 
     v = CVDVulnerability("CVE-2024-001")
-    v.scoring.cve_vector = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
-    v.scoring.cvss_base_score = 9.8
+    # Set CVSSScore first (it contains both base_score and vector)
+    v.cvss_scores.append(
+        CVSSScore(
+            version=3.1,
+            base_score=9.8,
+            vector="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+            source="test",
+            source_status=None,
+            reserved_at=None,
+            published_at=None,
+            updated_at=None,
+            temporal_score=None,
+            environmental_score=None,
+        )
+    )
 
     arr = CVDArray([v])
+    arr.transform()  # Required before accessing computed properties
 
     assert arr.cvss_scores[0] == 9.8
     assert arr.attack_vector[0] == "N"
@@ -1163,13 +1167,23 @@ def test_cvss_properties():
 
 def test_enrichment_properties():
     """Test enrichment properties (epss, kev)."""
+    from datetime import datetime
+
     from vulnstate import CVDArray, CVDVulnerability
+    from vulnstate.models import EPSSScore, KEVEntry
 
     v = CVDVulnerability("CVE-2024-001")
-    v.enrichment.epss = 0.85
-    v.enrichment.kev = True
+    v.epss_scores.append(EPSSScore(model=4, probability=0.85, percentile=0.0, computed_at=None))
+    v.kev_entry = KEVEntry(
+        added_at=datetime.now(),
+        due_date=None,
+        required_action=None,
+        ransomware_use=None,
+        notes=None,
+    )
 
     arr = CVDArray([v])
+    arr.transform()  # Required before accessing computed properties
 
     assert arr.epss[0] == 0.85
     assert arr.kev[0]
@@ -1190,6 +1204,7 @@ class TestAnalyticalPropertiesEdgeCases:
 
         arr = CVDArray([v])
         arr.sync()
+        arr.transform()
 
         assert not arr.is_zero_day_exploit[0], "Should be False when V before X"
 
@@ -1201,6 +1216,7 @@ class TestAnalyticalPropertiesEdgeCases:
 
         arr = CVDArray([v])
         arr.sync()
+        arr.transform()
 
         assert not arr.is_zero_day_exploit[0], "Should be False when X is NaT"
 
@@ -1216,6 +1232,7 @@ class TestAnalyticalPropertiesEdgeCases:
 
         arr = CVDArray([v])
         arr.sync()
+        arr.transform()
 
         assert not arr.is_zero_day_attack[0], "Should be False when V before A"
 
@@ -1227,6 +1244,7 @@ class TestAnalyticalPropertiesEdgeCases:
 
         arr = CVDArray([v])
         arr.sync()
+        arr.transform()
 
         assert not arr.is_zero_day_attack[0], "Should be False when A is NaT"
 
@@ -1242,6 +1260,7 @@ class TestAnalyticalPropertiesEdgeCases:
 
         arr = CVDArray([v])
         arr.sync()
+        arr.transform()
 
         assert not arr.is_coordinated[0], "Should be False when P before V"
 
@@ -1253,6 +1272,7 @@ class TestAnalyticalPropertiesEdgeCases:
 
         arr = CVDArray([v])
         arr.sync()
+        arr.transform()
 
         assert not arr.is_coordinated[0], "Should be False when P is NaT"
 
@@ -1269,6 +1289,7 @@ class TestAnalyticalPropertiesEdgeCases:
 
         arr = CVDArray([v])
         arr.sync()
+        arr.transform()
 
         assert not arr.is_responsible_disclosure[0], "Should be False when P before F"
 
@@ -1285,6 +1306,7 @@ class TestAnalyticalPropertiesEdgeCases:
 
         arr = CVDArray([v])
         arr.sync()
+        arr.transform()
 
         assert not arr.has_fix_before_exploit[0], "Should be False when X before F"
 
@@ -1297,6 +1319,7 @@ class TestAnalyticalPropertiesEdgeCases:
 
         arr = CVDArray([v])
         arr.sync()
+        arr.transform()
 
         assert not arr.has_fix_before_exploit[0], "Should be False when X is NaT"
 
@@ -1313,6 +1336,7 @@ class TestAnalyticalPropertiesEdgeCases:
 
         arr = CVDArray([v])
         arr.sync()
+        arr.transform()
 
         assert not arr.has_fix_before_attack[0], "Should be False when A before F"
 
@@ -1330,6 +1354,7 @@ class TestAnalyticalPropertiesEdgeCases:
 
         arr = CVDArray([v])
         arr.sync()
+        arr.transform()
 
         assert not arr.has_deployment_before_exploit[0], "Should be False when X before D"
 
@@ -1347,6 +1372,7 @@ class TestAnalyticalPropertiesEdgeCases:
 
         arr = CVDArray([v])
         arr.sync()
+        arr.transform()
 
         assert not arr.has_deployment_before_attack[0], "Should be False when A before D"
 
@@ -1363,6 +1389,7 @@ class TestAnalyticalPropertiesEdgeCases:
 
         arr = CVDArray([v])
         arr.sync()
+        arr.transform()
 
         assert not arr.is_private_attack[0], "Should be False when X present"
 
@@ -1379,6 +1406,7 @@ class TestAnalyticalPropertiesEdgeCases:
 
         arr = CVDArray([v])
         arr.sync()
+        arr.transform()
 
         assert not arr.is_mass_exploitation[0], "Should be False when only X (needs both X and A)"
 
@@ -1395,12 +1423,14 @@ class TestAnalyticalPropertiesEdgeCases:
 
         arr = CVDArray([v])
         arr.sync()
+        arr.transform()
 
         assert not arr.is_mass_exploitation[0], "Should be False when only A (needs both X and A)"
 
     def test_all_analytical_properties_with_empty_array(self):
         """Verify all properties return empty arrays for empty CVDArray."""
         arr = CVDArray([])
+        arr.transform()
 
         assert len(arr.is_zero_day_exploit) == 0
         assert len(arr.is_zero_day_attack) == 0
@@ -1417,6 +1447,7 @@ class TestAnalyticalPropertiesEdgeCases:
         """Verify all properties work with single-element array."""
         v = CVDVulnerability("CVE-2024-001")
         arr = CVDArray([v])
+        arr.transform()
 
         # All should return length 1 boolean arrays
         assert len(arr.is_zero_day_exploit) == 1
@@ -1437,6 +1468,7 @@ class TestAnalyticalPropertiesEdgeCases:
         v3 = CVDVulnerability("CVE-2024-003")
         # No events applied
         arr = CVDArray([v1, v2, v3])
+        arr.transform()
 
         # All should be False when no events occurred
         assert not np.any(arr.is_zero_day_exploit)
@@ -1466,6 +1498,7 @@ class TestPropertyConsistency:
 
         arr = CVDArray([v])
         arr.sync()
+        arr.transform()
 
         # If is_zero_day_exploit is True, is_zero_day should also be True
         if arr.is_zero_day_exploit[0]:
@@ -1483,6 +1516,7 @@ class TestPropertyConsistency:
 
         arr = CVDArray([v])
         arr.sync()
+        arr.transform()
 
         # If is_zero_day_attack is True, is_zero_day should also be True
         if arr.is_zero_day_attack[0]:
@@ -1501,6 +1535,7 @@ class TestPropertyConsistency:
 
         arr = CVDArray([v])
         arr.sync()
+        arr.transform()
 
         # If is_mass_exploitation is True, both is_weaponized and is_under_attack must be True
         if arr.is_mass_exploitation[0]:
@@ -1538,6 +1573,7 @@ class TestPropertyConsistency:
 
         arr = CVDArray([v1, v2])
         arr.sync()
+        arr.transform()
 
         # v1 should be private attack but not mass exploitation
         assert arr.is_private_attack[0]
@@ -1640,6 +1676,7 @@ class TestPairMaskAndHistoryId:
 
         arr = CVDArray([v])
         arr.sync()
+        arr.transform()
 
         # Bit 3 = V≺X should be clear (X came first)
         assert (arr.pair_mask[0] & (1 << 3)) == 0
@@ -1827,6 +1864,550 @@ class TestPairMaskAndHistoryId:
         # v1 should be 69, v2 should be 255
         assert arr.history_id[0] == 69
         assert arr.history_id[1] == 255
+
+
+class TestRecompute:
+    """Test _recompute() ETL method."""
+
+    def test_recompute_populates_analysis(self):
+        """_recompute() should populate _analysis field."""
+        arr = CVDArray.generate(10)
+        # Access internal - _analysis should be populated after construction
+        assert arr._analysis is not None
+        assert len(arr._analysis.is_zero_day) == 10
+
+    def test_recompute_populates_cvss_metrics(self):
+        """_recompute() should parse CVSS vectors."""
+        arr = CVDArray.generate(10)
+        assert arr._cvss_metrics is not None
+        assert len(arr._cvss_metrics.attack_vector) == 10
+
+    def test_recompute_called_by_sync(self):
+        """sync() should trigger _recompute()."""
+        from vulnstate.constants import CVDEvent
+
+        arr = CVDArray.generate(5)
+        vuln = arr.get(0)
+        vuln.apply_event(CVDEvent.P)
+        arr.sync()
+        # After sync, analysis should reflect the change
+        assert arr._analysis is not None
+
+    def test_analysis_property_uses_etl(self):
+        """analysis property should return pre-computed _analysis."""
+        arr = CVDArray.generate(10)
+        # Should not trigger lazy computation
+        analysis = arr.analysis
+        assert analysis is arr._analysis  # Same object, not recomputed
+
+    def test_cvss_properties_use_etl(self):
+        """CVSS properties should use pre-computed _cvss_metrics."""
+        arr = CVDArray.generate(10)
+        av = arr.attack_vector
+        assert len(av) == 10
+        # Should be same array from _cvss_metrics
+        assert av is arr._cvss_metrics.attack_vector
+
+
+class TestApplyEventSignature:
+    def test_timestamp_is_third_parameter(self):
+        """timestamp should be 3rd param after index and event."""
+        from datetime import datetime
+
+        from vulnstate.constants import CVDEvent
+
+        # Use zeros() to ensure no events have been applied
+        arr = CVDArray.zeros(5)
+        ts = datetime(2024, 1, 15)
+        # New signature: apply_event(index, event, timestamp, mask)
+        arr.apply_event(0, CVDEvent.P, ts)
+        assert arr.get(0).events[CVDEvent.P] == ts
+
+    def test_mask_is_fourth_parameter(self):
+        """mask should be 4th param (keyword)."""
+        import numpy as np
+
+        from vulnstate.constants import CVDEvent
+
+        # Use zeros() to ensure no events have been applied
+        arr = CVDArray.zeros(5)
+        mask = np.array([True, True, False, False, False])
+        arr.apply_event(0, CVDEvent.P, mask=mask)
+        # Only first two should have P applied
+        assert arr.get(0).has_event_occurred(CVDEvent.P)
+        assert arr.get(1).has_event_occurred(CVDEvent.P)
+        assert not arr.get(2).has_event_occurred(CVDEvent.P)
+
+
+# =============================================================================
+# Tests for transform state tracking (API v2 Task 2)
+# =============================================================================
+
+
+class TestTransformStateTracking:
+    """Tests for transform state tracking properties (is_transformed, stale, transformed_at)."""
+
+    def test_is_transformed_false_initially(self):
+        """is_transformed should be False before transform() is called."""
+        arr = CVDArray.zeros(10)
+        assert arr.is_transformed is False
+
+    def test_is_transformed_true_after_transform(self):
+        """is_transformed should be True after transform() is called."""
+        arr = CVDArray.zeros(10)
+        arr.transform()
+        assert arr.is_transformed is True
+
+    def test_stale_false_after_transform(self):
+        """stale should be False immediately after transform()."""
+        arr = CVDArray.zeros(10)
+        arr.transform()
+        assert arr.stale is False
+
+    def test_stale_true_after_mutation(self):
+        """stale should be True after mutation following transform()."""
+        arr = CVDArray.zeros(10)
+        arr.transform()
+        arr.lifecycle.apply_event(CVDEvent.V, mask=np.ones(10, dtype=bool))
+        assert arr.stale is True
+
+    def test_transformed_at_none_initially(self):
+        """transformed_at should be None before transform() is called."""
+        arr = CVDArray.zeros(10)
+        assert arr.transformed_at is None
+
+    def test_transformed_at_set_after_transform(self):
+        """transformed_at should be set to current time after transform()."""
+        from datetime import datetime
+
+        arr = CVDArray.zeros(10)
+        before = datetime.now()
+        arr.transform()
+        after = datetime.now()
+        assert arr.transformed_at is not None
+        assert before <= arr.transformed_at <= after
+
+    def test_transform_returns_self(self):
+        """transform() should return self for method chaining."""
+        arr = CVDArray.zeros(10)
+        result = arr.transform()
+        assert result is arr
+
+    def test_transform_skips_if_not_stale_and_not_forced(self):
+        """transform() should skip if already transformed, not stale, and force=False."""
+        arr = CVDArray.zeros(10)
+        arr.transform()
+        first_ts = arr.transformed_at
+
+        # Brief pause to ensure time difference if re-transformed
+        import time
+
+        time.sleep(0.001)
+
+        # Transform again without force - should skip
+        arr.transform()
+        assert arr.transformed_at == first_ts
+
+    def test_transform_reruns_if_forced(self):
+        """transform() should re-run if force=True."""
+        arr = CVDArray.zeros(10)
+        arr.transform()
+        first_ts = arr.transformed_at
+
+        # Brief pause to ensure time difference
+        import time
+
+        time.sleep(0.001)
+
+        # Transform again with force - should re-run
+        arr.transform(force=True)
+        assert arr.transformed_at > first_ts
+
+    def test_transform_reruns_if_stale(self):
+        """transform() should re-run if stale=True."""
+        arr = CVDArray.zeros(10)
+        arr.transform()
+        first_ts = arr.transformed_at
+
+        # Make stale via mutation
+        arr.lifecycle.apply_event(CVDEvent.V, mask=np.ones(10, dtype=bool))
+        assert arr.stale is True
+
+        # Brief pause to ensure time difference
+        import time
+
+        time.sleep(0.001)
+
+        # Transform again - should re-run because stale
+        arr.transform()
+        assert arr.transformed_at > first_ts
+        assert arr.stale is False
+
+
+# =============================================================================
+# Tests for TransformNotRunError guard (API v2 Task 3)
+# =============================================================================
+
+
+class TestTransformNotRunErrorGuard:
+    """Tests for TransformNotRunError guard on computed properties."""
+
+    def test_access_cvss_scores_before_transform_raises(self):
+        """cvss_scores should raise TransformNotRunError before transform()."""
+        from vulnstate.constants import TransformNotRunError
+
+        arr = CVDArray.zeros(10)
+        with pytest.raises(TransformNotRunError) as exc_info:
+            _ = arr.cvss_scores
+        assert "cvss_scores" in str(exc_info.value)
+
+    def test_access_cvss_scores_after_transform_works(self):
+        """cvss_scores should work after transform()."""
+        arr = CVDArray.zeros(10)
+        arr.transform()
+        scores = arr.cvss_scores
+        assert len(scores) == 10
+
+    def test_access_epss_before_transform_raises(self):
+        """epss should raise TransformNotRunError before transform()."""
+        from vulnstate.constants import TransformNotRunError
+
+        arr = CVDArray.zeros(10)
+        with pytest.raises(TransformNotRunError) as exc_info:
+            _ = arr.epss
+        assert "epss" in str(exc_info.value)
+
+    def test_access_epss_after_transform_works(self):
+        """epss should work after transform()."""
+        arr = CVDArray.zeros(10)
+        arr.transform()
+        scores = arr.epss
+        assert len(scores) == 10
+
+    def test_access_kev_before_transform_raises(self):
+        """kev should raise TransformNotRunError before transform()."""
+        from vulnstate.constants import TransformNotRunError
+
+        arr = CVDArray.zeros(10)
+        with pytest.raises(TransformNotRunError) as exc_info:
+            _ = arr.kev
+        assert "kev" in str(exc_info.value)
+
+    def test_access_kev_after_transform_works(self):
+        """kev should work after transform()."""
+        arr = CVDArray.zeros(10)
+        arr.transform()
+        kev = arr.kev
+        assert len(kev) == 10
+
+    def test_access_epss_percentile_before_transform_raises(self):
+        """epss_percentile should raise TransformNotRunError before transform()."""
+        from vulnstate.constants import TransformNotRunError
+
+        arr = CVDArray.zeros(10)
+        with pytest.raises(TransformNotRunError) as exc_info:
+            _ = arr.epss_percentile
+        assert "epss_percentile" in str(exc_info.value)
+
+    def test_access_epss_percentile_after_transform_works(self):
+        """epss_percentile should work after transform()."""
+        arr = CVDArray.zeros(10)
+        arr.transform()
+        percentiles = arr.epss_percentile
+        assert len(percentiles) == 10
+
+    def test_access_cvss_score_before_transform_raises(self):
+        """cvss_score should raise TransformNotRunError before transform()."""
+        from vulnstate.constants import TransformNotRunError
+
+        arr = CVDArray.zeros(10)
+        with pytest.raises(TransformNotRunError) as exc_info:
+            _ = arr.cvss_score
+        assert "cvss_score" in str(exc_info.value)
+
+    def test_access_cvss_score_after_transform_works(self):
+        """cvss_score should work after transform()."""
+        arr = CVDArray.zeros(10)
+        arr.transform()
+        scores = arr.cvss_score
+        assert len(scores) == 10
+        assert scores.dtype == np.float32
+
+    def test_access_cvss_max_before_transform_raises(self):
+        """cvss_max should raise TransformNotRunError before transform()."""
+        from vulnstate.constants import TransformNotRunError
+
+        arr = CVDArray.zeros(10)
+        with pytest.raises(TransformNotRunError) as exc_info:
+            _ = arr.cvss_max
+        assert "cvss_max" in str(exc_info.value)
+
+    def test_access_cvss_max_after_transform_works(self):
+        """cvss_max should work after transform()."""
+        arr = CVDArray.zeros(10)
+        arr.transform()
+        scores = arr.cvss_max
+        assert len(scores) == 10
+        assert scores.dtype == np.float32
+
+    def test_access_has_exploit_before_transform_raises(self):
+        """has_exploit should raise TransformNotRunError before transform()."""
+        from vulnstate.constants import TransformNotRunError
+
+        arr = CVDArray.zeros(10)
+        with pytest.raises(TransformNotRunError) as exc_info:
+            _ = arr.has_exploit
+        assert "has_exploit" in str(exc_info.value)
+
+    def test_access_has_exploit_after_transform_works(self):
+        """has_exploit should work after transform()."""
+        arr = CVDArray.zeros(10)
+        arr.transform()
+        result = arr.has_exploit
+        assert len(result) == 10
+        assert result.dtype == bool
+
+    def test_access_is_zero_day_before_transform_raises(self):
+        """is_zero_day should raise TransformNotRunError before transform()."""
+        from vulnstate.constants import TransformNotRunError
+
+        arr = CVDArray.zeros(10)
+        with pytest.raises(TransformNotRunError) as exc_info:
+            _ = arr.is_zero_day
+        assert "is_zero_day" in str(exc_info.value)
+
+    def test_access_is_zero_day_after_transform_works(self):
+        """is_zero_day should work after transform()."""
+        arr = CVDArray.zeros(10)
+        arr.transform()
+        result = arr.is_zero_day
+        assert len(result) == 10
+        assert result.dtype == bool
+
+    def test_all_desiderata_properties_require_transform(self):
+        """All 16 desiderata properties should raise TransformNotRunError before transform()."""
+        from vulnstate.constants import TransformNotRunError
+
+        arr = CVDArray.zeros(5)
+
+        desiderata_props = [
+            "is_zero_day",
+            "is_fix_available",
+            "is_fix_deployed",
+            "is_weaponized",
+            "is_under_attack",
+            "is_premature_disclosure",
+            "is_zero_day_exploit",
+            "is_zero_day_attack",
+            "is_coordinated",
+            "is_responsible_disclosure",
+            "has_fix_before_exploit",
+            "has_fix_before_attack",
+            "has_deployment_before_exploit",
+            "has_deployment_before_attack",
+            "is_private_attack",
+            "is_mass_exploitation",
+        ]
+
+        for prop in desiderata_props:
+            with pytest.raises(TransformNotRunError) as exc_info:
+                _ = getattr(arr, prop)
+            assert prop in str(exc_info.value), f"{prop} should mention property name in error"
+
+
+# =============================================================================
+# Tests for data science UX methods (API v2 Task 4)
+# =============================================================================
+
+
+class TestDataScienceUXMethods:
+    """Tests for head(), describe(), info() methods."""
+
+    def test_head_returns_first_n(self):
+        """head(n) should return first n items as CVDArray."""
+        arr = CVDArray.zeros(100)
+        head = arr.head(5)
+        assert len(head) == 5
+        assert isinstance(head, CVDArray)
+
+    def test_head_default_is_5(self):
+        """head() with no argument should return first 5 items."""
+        arr = CVDArray.zeros(100)
+        head = arr.head()
+        assert len(head) == 5
+
+    def test_head_small_array(self):
+        """head(n) should return all items if array has fewer than n items."""
+        arr = CVDArray.zeros(3)
+        head = arr.head(10)
+        assert len(head) == 3
+
+    def test_describe_returns_dict(self):
+        """describe() should return a dict with summary statistics."""
+        arr = CVDArray.generate(100, seed=42)
+        arr.transform()
+        desc = arr.describe()
+        assert isinstance(desc, dict)
+        assert "count" in desc
+        assert "cvss_mean" in desc
+
+    def test_describe_without_transform(self):
+        """describe() should work without transform (limited stats)."""
+        arr = CVDArray.zeros(50)
+        desc = arr.describe()
+        assert isinstance(desc, dict)
+        assert "count" in desc
+        assert desc["count"] == 50
+
+    def test_info_returns_string(self):
+        """info() should return a formatted string."""
+        arr = CVDArray.zeros(100)
+        info = arr.info()
+        assert isinstance(info, str)
+        assert "100" in info  # length
+
+    def test_info_contains_transform_state(self):
+        """info() should include transform state."""
+        arr = CVDArray.zeros(100)
+        info = arr.info()
+        assert "Transformed: False" in info
+
+        arr.transform()
+        info = arr.info()
+        assert "Transformed: True" in info
+
+
+# =============================================================================
+# Tests for import_dict (API v2 Task 5)
+# =============================================================================
+
+
+class TestImportDict:
+    """Tests for import_dict method for dict roundtrip workflow."""
+
+    def test_import_dict_adds_vulnerabilities(self):
+        """import_dict should add vulnerabilities from list of dicts."""
+        arr = CVDArray()
+        arr.import_dict(
+            [
+                {"cve_id": "CVE-2024-1234", "state": "VFdpxa"},
+                {"cve_id": "CVE-2024-5678", "state": "vfdPxa"},
+            ]
+        )
+        assert len(arr) == 2
+        assert arr.cve_ids[0] == "CVE-2024-1234"
+        assert arr.cve_ids[1] == "CVE-2024-5678"
+
+    def test_import_dict_roundtrip(self):
+        """import_dict should enable full roundtrip with to_dict_batch."""
+        arr = CVDArray.generate(10, seed=42)
+        arr.transform()
+
+        # Export and reimport
+        exported = arr.to_dict_batch(include_computed=False)
+
+        arr2 = CVDArray()
+        arr2.import_dict(exported)
+        arr2.transform()
+
+        assert len(arr2) == len(arr)
+        np.testing.assert_array_equal(arr2.cve_ids, arr.cve_ids)
+
+    def test_import_dict_returns_self(self):
+        """import_dict should return self for method chaining."""
+        arr = CVDArray()
+        result = arr.import_dict([{"cve_id": "CVE-2024-001"}])
+        assert result is arr
+
+    def test_import_dict_preserves_state(self):
+        """import_dict should preserve vulnerability state."""
+        arr = CVDArray()
+        arr.import_dict(
+            [
+                {"cve_id": "CVE-2024-001", "state": "VFDpxa"},
+            ]
+        )
+        assert arr.states[0] == "VFDpxa"
+        assert arr.has_event_occurred(CVDEvent.V)[0]
+        assert arr.has_event_occurred(CVDEvent.F)[0]
+        assert arr.has_event_occurred(CVDEvent.D)[0]
+        assert not arr.has_event_occurred(CVDEvent.P)[0]
+
+    def test_import_dict_empty_list(self):
+        """import_dict with empty list should not change array."""
+        arr = CVDArray()
+        arr.import_dict([])
+        assert len(arr) == 0
+
+    def test_import_dict_appends_to_existing(self):
+        """import_dict should append to existing vulnerabilities."""
+        arr = CVDArray([CVDVulnerability("CVE-2024-000")])
+        assert len(arr) == 1
+
+        arr.import_dict(
+            [
+                {"cve_id": "CVE-2024-001"},
+                {"cve_id": "CVE-2024-002"},
+            ]
+        )
+        assert len(arr) == 3
+        assert arr.cve_ids[0] == "CVE-2024-000"
+        assert arr.cve_ids[1] == "CVE-2024-001"
+        assert arr.cve_ids[2] == "CVE-2024-002"
+
+    def test_import_dict_on_error_skip(self):
+        """import_dict with on_error='skip' should skip invalid records."""
+        arr = CVDArray()
+        # Invalid state should be skipped
+        arr.import_dict(
+            [
+                {"cve_id": "CVE-2024-001", "state": "VFdpxa"},
+                {"cve_id": "CVE-2024-002", "state": "INVALID_STATE"},  # Invalid
+                {"cve_id": "CVE-2024-003", "state": "vfdpxa"},
+            ],
+            on_error="skip",
+        )
+        # Should have at least the valid ones
+        assert len(arr) >= 2
+
+    def test_import_dict_on_error_raise(self):
+        """import_dict with on_error='raise' should raise on invalid records."""
+        arr = CVDArray()
+        with pytest.raises((ValueError, KeyError, TypeError)):
+            arr.import_dict(
+                [
+                    {"cve_id": "CVE-2024-001", "state": "INVALID_STATE"},
+                ],
+                on_error="raise",
+            )
+
+
+class TestFilteredArrayTransformInheritance:
+    """Test that filtered arrays inherit transform state."""
+
+    def test_filtered_array_inherits_transform_state(self):
+        """Filtered array should inherit is_transformed flag."""
+        arr = CVDArray.generate(100, seed=42)
+        arr.transform()
+
+        # Filter to subset
+        mask = arr.cvss_scores >= 7.0
+        filtered = arr[mask]
+
+        # Should inherit transform state
+        assert filtered.is_transformed is True
+        assert filtered.stale is False
+
+    def test_filtered_array_copies_cache(self):
+        """Filtered array should have sliced cache data."""
+        arr = CVDArray.generate(100, seed=42)
+        arr.transform()
+
+        mask = arr.cvss_scores >= 7.0
+        filtered = arr[mask]
+
+        # Should be able to access computed properties without transform()
+        _ = filtered.cvss_scores  # Should not raise
 
 
 if __name__ == "__main__":

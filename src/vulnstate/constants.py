@@ -929,6 +929,32 @@ def get_events_from_state(state_int: int) -> list[CVDEvent]:
     return [event for event in ordered if state_int & (1 << event)]
 
 
+# ==================== EXCEPTION CLASSES ====================
+
+
+class TransformNotRunError(Exception):
+    """Raised when accessing computed properties before transform() is called."""
+
+    def __init__(self, property_name: str):
+        self.property_name = property_name
+        super().__init__(
+            f"Cannot access '{property_name}' before transform() is called. "
+            f"Run arr.transform() first."
+        )
+
+
+class ArrayFullError(Exception):
+    """Raised when import exceeds fixed array capacity."""
+
+    def __init__(self, capacity: int, attempted: int):
+        self.capacity = capacity
+        self.attempted = attempted
+        super().__init__(
+            f"Array has fixed capacity of {capacity}, "
+            f"cannot import {attempted} items."
+        )
+
+
 # ==================== VECTORIZED CONVERSION FUNCTIONS ====================
 
 

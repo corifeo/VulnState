@@ -18,7 +18,7 @@ class TestEpssSyncRegression:
     """Guard against EPSS not syncing from vuln objects to array properties."""
 
     def test_import_epss_syncs_to_array_level(self, tmp_path):
-        """EPSS import must update both vuln.epss and arr.enrichment.epss."""
+        """EPSS import must update both vuln.epss and arr.epss."""
         # Create array with known CVE
         arr = CVDArray([CVDVulnerability("CVE-2023-0669")])
 
@@ -28,13 +28,14 @@ class TestEpssSyncRegression:
 
         # Import EPSS data using array convenience method
         arr.import_epss(str(epss_file))
+        arr.transform()
 
         # CRITICAL: Both must be set
-        assert arr[0].enrichment.epss == pytest.approx(0.5)
-        assert arr.enrichment.epss[0] == pytest.approx(0.5), "Array-level EPSS must sync"
+        assert arr[0].epss == pytest.approx(0.5)
+        assert arr.epss[0] == pytest.approx(0.5), "Array-level EPSS must sync"
 
     def test_import_kev_syncs_to_array_level(self, tmp_path):
-        """KEV import must update both vuln.kev and arr.enrichment.kev."""
+        """KEV import must update both vuln.kev and arr.kev."""
         arr = CVDArray([CVDVulnerability("CVE-2023-0669")])
 
         kev_file = tmp_path / "kev.csv"
@@ -44,9 +45,10 @@ class TestEpssSyncRegression:
         )
 
         arr.import_kev(str(kev_file))
+        arr.transform()
 
-        assert arr[0].enrichment.kev == True  # noqa: E712 - numpy bool
-        assert arr.enrichment.kev[0] == True, "Array-level KEV must sync"  # noqa: E712
+        assert arr[0].kev == True  # noqa: E712 - numpy bool
+        assert arr.kev[0] == True, "Array-level KEV must sync"  # noqa: E712
 
 
 class TestDataFrameOverwriteRegression:
@@ -60,6 +62,7 @@ class TestDataFrameOverwriteRegression:
         epss_file.write_text("cve,epss,percentile\nCVE-2023-0669,0.5,0.9\n")
 
         arr.import_epss(str(epss_file))
+        arr.transform()
 
         # Export to DataFrame with metadata explosion
         df = arr.to_dataframe(explode_metadata=True)

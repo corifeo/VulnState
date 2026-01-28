@@ -26,7 +26,9 @@ def create_vuln(history: str) -> CVDVulnerability:
 
 def create_all_histories_array() -> CVDArray:
     """Create CVDArray with all 70 valid histories."""
-    return CVDArray([create_vuln(h) for h in VALID_HISTORIES])
+    arr = CVDArray([create_vuln(h) for h in VALID_HISTORIES])
+    arr.transform()
+    return arr
 
 
 class TestSingleVsArrayConsistency:
@@ -44,6 +46,7 @@ class TestSingleVsArrayConsistency:
         for h in VALID_HISTORIES[:5] + VALID_HISTORIES[-5:]:
             single = create_vuln(h)
             arr = CVDArray([single])
+            arr.transform()
             assert single.is_zero_day == arr.is_zero_day[0]
 
     def test_has_fix_before_exploit_matches(self):
@@ -178,3 +181,47 @@ class TestDataFrameGroupOperations:
         # All terminal, so all should have exploits and attacks
         grouped = df.groupby("is_weaponized").size()
         assert grouped.get(True, 0) == 70
+
+
+class TestDataFrameSchemaCompleteness:
+    """Test that to_dataframe() includes all required columns."""
+
+    def test_dataframe_has_all_desiderata_columns(self):
+        arr = CVDArray.generate(100, seed=42)
+        arr.transform()
+        df = arr.to_dataframe()
+
+        # Zero-day indicators
+        assert "is_zero_day" in df.columns
+        assert "is_zero_day_exploit" in df.columns
+        assert "is_zero_day_attack" in df.columns
+
+        # Coordination quality
+        assert "is_coordinated" in df.columns
+        assert "is_premature_disclosure" in df.columns
+        assert "is_responsible_disclosure" in df.columns
+
+        # Fix effectiveness
+        assert "has_fix_before_exploit" in df.columns
+        assert "has_fix_before_attack" in df.columns
+        assert "has_deployment_before_exploit" in df.columns
+        assert "has_deployment_before_attack" in df.columns
+
+        # Threat characteristics
+        assert "is_weaponized" in df.columns
+        assert "is_under_attack" in df.columns
+        assert "is_private_attack" in df.columns
+        assert "is_mass_exploitation" in df.columns
+
+        # Scores
+        assert "desiderata_score" in df.columns
+        assert "validity" in df.columns
+
+    def test_dataframe_has_time_deltas(self):
+        arr = CVDArray.generate(100, seed=42)
+        arr.transform()
+        df = arr.to_dataframe()
+
+        assert "fix_lag_days" in df.columns
+        assert "deployment_lag_days" in df.columns
+        assert "disclosure_window_days" in df.columns

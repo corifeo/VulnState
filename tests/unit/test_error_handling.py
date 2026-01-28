@@ -4,7 +4,6 @@ Error Handling Tests
 Tests for input validation and error handling in CVDVulnerability and CVDArray.
 """
 
-import numpy as np
 import pytest
 
 from vulnstate import CVDArray, CVDEvent, CVDVulnerability
@@ -14,66 +13,33 @@ pytestmark = pytest.mark.unit
 
 
 class TestEPSSValidation:
-    """Tests for EPSS score validation."""
+    """Tests for EPSS score validation via set_epss method."""
 
     def test_epss_accepts_valid_scores(self):
-        """EPSS accepts values in [0.0, 1.0] range."""
+        """set_epss accepts values in [0.0, 1.0] range."""
         vuln = CVDVulnerability("CVE-2024-001")
         valid_scores = [0.0, 0.5, 0.99, 1.0]
 
         for score in valid_scores:
-            vuln.epss = score
+            vuln.set_epss(score)
             assert vuln.epss == score
 
     def test_epss_accepts_none(self):
-        """EPSS can be cleared with None."""
+        """EPSS can be cleared with set_epss(None)."""
         vuln = CVDVulnerability("CVE-2024-001")
-        vuln.epss = 0.5
-        vuln.epss = None
+        vuln.set_epss(0.5)
+        vuln.set_epss(None)
         assert vuln.epss is None
 
-    def test_epss_handles_edge_values(self):
-        """EPSS handles edge values (no validation enforced)."""
+    def test_epss_rejects_out_of_range(self):
+        """set_epss rejects values outside [0.0, 1.0] range."""
         vuln = CVDVulnerability("CVE-2024-001")
-        # Note: Library does not enforce 0-1 range validation
-        # These tests document actual behavior
-        vuln.epss = -0.1
-        assert vuln.epss == -0.1
+        # set_epss validates range
+        with pytest.raises(ValueError, match="EPSS score must be between"):
+            vuln.set_epss(-0.1)
 
-        vuln.epss = 1.5
-        assert vuln.epss == 1.5
-
-
-class TestMatrixShapeValidation:
-    """Tests for CVDArray.from_matrix() shape validation."""
-
-    def test_valid_matrix_shape(self):
-        """Valid (N, 6) matrices are accepted."""
-        valid_matrix = np.array(
-            [
-                [1, 0, 0, 0, 0, 0],  # V event only
-                [1, 1, 0, 0, 0, 0],  # V, F events
-                [1, 1, 1, 0, 0, 0],  # V, F, D events
-            ]
-        )
-        arr = CVDArray.from_matrix(valid_matrix)
-        assert len(arr) == 3
-
-    def test_1d_array_rejected(self):
-        """1D arrays are rejected."""
-        invalid = np.array([1, 0, 0, 0, 0, 0])
-        with pytest.raises(ValueError):
-            CVDArray.from_matrix(invalid)
-
-    def test_wrong_column_count_rejected(self):
-        """Matrices with wrong column count are rejected."""
-        invalid_5_cols = np.ones((10, 5))
-        with pytest.raises(ValueError):
-            CVDArray.from_matrix(invalid_5_cols)
-
-        invalid_7_cols = np.ones((10, 7))
-        with pytest.raises(ValueError):
-            CVDArray.from_matrix(invalid_7_cols)
+        with pytest.raises(ValueError, match="EPSS score must be between"):
+            vuln.set_epss(1.5)
 
 
 class TestStateLabels:
@@ -130,3 +96,23 @@ class TestFactoryMethods:
         # All states should be non-empty strings
         states = arr.states
         assert all(len(s) == 6 for s in states)
+
+
+class TestExceptionClasses:
+    """Tests for custom exception classes."""
+
+    def test_transform_not_run_error_exists(self):
+        """TransformNotRunError has correct message format."""
+        from vulnstate.constants import TransformNotRunError
+
+        err = TransformNotRunError("cvss_score")
+        assert "cvss_score" in str(err)
+        assert "transform()" in str(err)
+
+    def test_array_full_error_exists(self):
+        """ArrayFullError has correct message format."""
+        from vulnstate.constants import ArrayFullError
+
+        err = ArrayFullError(100, 150)
+        assert "100" in str(err)
+        assert "150" in str(err)

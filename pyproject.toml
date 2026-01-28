@@ -39,6 +39,7 @@ dependencies = [
     "numpy>=1.20.0",
     "orjson>=3.11.5",
     "pandas>=2.0.0",
+    "pytest>=8.4.2",
     "rich>=13.0.0",
 ]
 
@@ -107,3 +108,10 @@ target-version = "py39"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM"]
 ignore = ["E501"]
+
+[dependency-groups]
+dev = [
+    "black>=25.11.0",
+    "mypy>=1.19.1",
+    "ruff>=0.14.11",
+]

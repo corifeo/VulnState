@@ -23,10 +23,12 @@ class TestSlicingBehavior:
 
     def test_slice_creates_independent_copy(self):
         """Sliced array modifications must not affect parent."""
-        arr = CVDArray([
-            CVDVulnerability("CVE-2024-001"),
-            CVDVulnerability("CVE-2024-002"),
-        ])
+        arr = CVDArray(
+            [
+                CVDVulnerability("CVE-2024-001"),
+                CVDVulnerability("CVE-2024-002"),
+            ]
+        )
 
         # Slice to get first item
         sliced = arr[:1]
@@ -63,6 +65,7 @@ class TestNaNPropagation:
         vuln.apply_event(CVDEvent.V, timestamp=datetime.now())
 
         arr = CVDArray([vuln])
+        arr.transform()
 
         # Properties should return valid values, not raise
         # Zero-day check needs X or A timestamp - should be False, not error
@@ -70,13 +73,16 @@ class TestNaNPropagation:
 
     def test_epss_nan_for_unmatched_cves(self):
         """EPSS import leaves NaN for CVEs not in feed."""
-        arr = CVDArray([
-            CVDVulnerability("CVE-2024-001"),
-            CVDVulnerability("CVE-2024-002"),
-        ])
+        arr = CVDArray(
+            [
+                CVDVulnerability("CVE-2024-001"),
+                CVDVulnerability("CVE-2024-002"),
+            ]
+        )
+        arr.transform()
 
         # No EPSS imported - should have NaN
-        epss_values = arr.enrichment.epss
+        epss_values = arr.epss
         assert np.isnan(epss_values[0]) or epss_values[0] is None
         assert np.isnan(epss_values[1]) or epss_values[1] is None
 
@@ -89,9 +95,10 @@ class TestLazyParsingEdgeCases:
         vuln = CVDVulnerability("CVE-2024-001")
         # No CVSS vector set
         arr = CVDArray([vuln])
+        arr.transform()
 
         # Accessing CVSS metrics should not raise
-        score = arr.scoring.cvss_score
+        score = arr.cvss_scores
         assert score[0] is None or np.isnan(score[0])
 
     def test_metadata_access_without_import(self):
@@ -108,9 +115,7 @@ class TestArrayLengthInvariants:
 
     def test_all_arrays_same_length_after_slicing(self):
         """Sliced arrays maintain consistent internal lengths."""
-        arr = CVDArray([
-            CVDVulnerability(f"CVE-2024-{i:03d}") for i in range(10)
-        ])
+        arr = CVDArray([CVDVulnerability(f"CVE-2024-{i:03d}") for i in range(10)])
 
         # Apply slicing
         subset = arr[:5]
@@ -136,10 +141,12 @@ class TestStateConsistency:
 
     def test_batch_apply_updates_state(self):
         """apply_event_batch updates states correctly."""
-        arr = CVDArray([
-            CVDVulnerability("CVE-2024-001"),
-            CVDVulnerability("CVE-2024-002"),
-        ])
+        arr = CVDArray(
+            [
+                CVDVulnerability("CVE-2024-001"),
+                CVDVulnerability("CVE-2024-002"),
+            ]
+        )
 
         # Batch apply V to all
         arr.apply_event_batch(CVDEvent.V)

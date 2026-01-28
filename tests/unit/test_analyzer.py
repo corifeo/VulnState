@@ -1,6 +1,6 @@
 # tests/test_analyzer.py
 """
-Tests for CVDAnalyzer - Vectorized analytics computation.
+Tests for DesiderataExtractor - Vectorized analytics computation.
 """
 
 import numpy as np
@@ -14,10 +14,10 @@ pytestmark = pytest.mark.unit
 
 def test_analyzer_init():
     """Analyzer initializes with array context."""
-    from vulnstate.analyzer import CVDAnalyzer
+    from vulnstate.transforms.desiderata import DesiderataExtractor
 
     arr = CVDArray.zeros(10)
-    analyzer = CVDAnalyzer(arr)
+    analyzer = DesiderataExtractor(arr)
 
     assert analyzer.n == 10
     assert analyzer.states is arr.state_ints
@@ -25,7 +25,7 @@ def test_analyzer_init():
 
 def test_analyzer_fix_path():
     """Fix path computed from VFD bits."""
-    from vulnstate.analyzer import CVDAnalyzer
+    from vulnstate.transforms.desiderata import DesiderataExtractor
 
     vulns = [
         CVDVulnerability(state="vfdpxa"),  # 0b000 = No Awareness
@@ -34,7 +34,7 @@ def test_analyzer_fix_path():
         CVDVulnerability(state="VFDpxa"),  # 0b111 = Remediated
     ]
     arr = CVDArray(vulns)
-    analyzer = CVDAnalyzer(arr)
+    analyzer = DesiderataExtractor(arr)
 
     fix_paths = analyzer.fix_path
     assert fix_paths[0] == 0b000
@@ -45,7 +45,7 @@ def test_analyzer_fix_path():
 
 def test_analyzer_threat_state():
     """Threat state computed from PXA bits."""
-    from vulnstate.analyzer import CVDAnalyzer
+    from vulnstate.transforms.desiderata import DesiderataExtractor
 
     vulns = [
         CVDVulnerability(state="VFDpxa"),  # 0b000 = Latent
@@ -54,7 +54,7 @@ def test_analyzer_threat_state():
         CVDVulnerability(state="VFDPXA"),  # 0b111 = Active Threat
     ]
     arr = CVDArray(vulns)
-    analyzer = CVDAnalyzer(arr)
+    analyzer = DesiderataExtractor(arr)
 
     threat_states = analyzer.threat_state
     assert threat_states[0] == 0b000
@@ -67,7 +67,7 @@ def test_analyzer_pair_mask_valid():
     """Pair mask computed for valid history."""
     from datetime import datetime, timedelta
 
-    from vulnstate.analyzer import CVDAnalyzer
+    from vulnstate.transforms.desiderata import DesiderataExtractor
 
     base = datetime(2024, 1, 1)
     vuln = CVDVulnerability()
@@ -78,7 +78,7 @@ def test_analyzer_pair_mask_valid():
     vuln.apply_event(CVDEvent.P, timestamp=base + timedelta(days=30))
 
     arr = CVDArray([vuln])
-    analyzer = CVDAnalyzer(arr)
+    analyzer = DesiderataExtractor(arr)
 
     # Check pair mask has V≺F, V≺D, F≺D bits set
     pair_mask = analyzer.pair_mask
@@ -91,8 +91,8 @@ def test_analyzer_validity_valid():
     """Valid history passes validation."""
     from datetime import datetime, timedelta
 
-    from vulnstate.analyzer import CVDAnalyzer
     from vulnstate.constants import HistoryValidity
+    from vulnstate.transforms.desiderata import DesiderataExtractor
 
     base = datetime(2024, 1, 1)
     vuln = CVDVulnerability()
@@ -100,7 +100,7 @@ def test_analyzer_validity_valid():
     vuln.apply_event(CVDEvent.F, timestamp=base + timedelta(days=10))
 
     arr = CVDArray([vuln])
-    analyzer = CVDAnalyzer(arr)
+    analyzer = DesiderataExtractor(arr)
 
     assert analyzer.validity[0] == HistoryValidity.VALID
 
@@ -109,8 +109,8 @@ def test_analyzer_validity_impossible():
     """Impossible history (F before V) detected."""
     from datetime import datetime, timedelta
 
-    from vulnstate.analyzer import CVDAnalyzer
     from vulnstate.constants import HistoryValidity
+    from vulnstate.transforms.desiderata import DesiderataExtractor
 
     # Manually create impossible state (F timestamp before V)
     base = datetime(2024, 1, 1)
@@ -121,7 +121,7 @@ def test_analyzer_validity_impossible():
     vuln.state.state_encoded |= 1 << 1  # Set F bit
 
     arr = CVDArray([vuln])
-    analyzer = CVDAnalyzer(arr)
+    analyzer = DesiderataExtractor(arr)
 
     assert analyzer.validity[0] == HistoryValidity.IMPOSSIBLE
 
@@ -130,14 +130,14 @@ def test_analyzer_infer_v_from_p():
     """V inferred from P (vendor learns from public)."""
     from datetime import datetime
 
-    from vulnstate.analyzer import CVDAnalyzer
+    from vulnstate.transforms.desiderata import DesiderataExtractor
 
     vuln = CVDVulnerability()
     vuln.apply_event(CVDEvent.P, timestamp=datetime(2024, 2, 1))
     # V not applied, but should be inferred
 
     arr = CVDArray([vuln])
-    analyzer = CVDAnalyzer(arr)
+    analyzer = DesiderataExtractor(arr)
 
     # Before inference
     assert np.isnat(arr.timestamps.V[0])
@@ -155,7 +155,7 @@ def test_analyzer_infer_v_from_f():
     """V inferred from F (causality constraint)."""
     from datetime import datetime
 
-    from vulnstate.analyzer import CVDAnalyzer
+    from vulnstate.transforms.desiderata import DesiderataExtractor
 
     # Create vuln with F but no V (impossible to do normally, simulate import)
     vuln = CVDVulnerability()
@@ -165,7 +165,7 @@ def test_analyzer_infer_v_from_f():
     arr = CVDArray([vuln])
     arr.timestamps.F[0] = np.datetime64(datetime(2024, 1, 15), "us")
 
-    analyzer = CVDAnalyzer(arr)
+    analyzer = DesiderataExtractor(arr)
     analyzer.apply_inferences()
 
     # V should be inferred before F
@@ -177,13 +177,13 @@ def test_analyzer_inferred_mask():
     """Inferred mask tracks which events were inferred."""
     from datetime import datetime
 
-    from vulnstate.analyzer import CVDAnalyzer
+    from vulnstate.transforms.desiderata import DesiderataExtractor
 
     vuln = CVDVulnerability()
     vuln.apply_event(CVDEvent.P, timestamp=datetime(2024, 2, 1))
 
     arr = CVDArray([vuln])
-    analyzer = CVDAnalyzer(arr)
+    analyzer = DesiderataExtractor(arr)
     analyzer.apply_inferences()
 
     # V was inferred (bit 0), P was observed (bit 3 not set)
@@ -196,7 +196,7 @@ def test_analyzer_desiderata_score():
     """Desiderata score computed from satisfied pairs."""
     from datetime import datetime, timedelta
 
-    from vulnstate.analyzer import CVDAnalyzer
+    from vulnstate.transforms.desiderata import DesiderataExtractor
 
     base = datetime(2024, 1, 1)
 
@@ -210,7 +210,7 @@ def test_analyzer_desiderata_score():
     vuln.apply_event(CVDEvent.A, timestamp=base + timedelta(days=50))
 
     arr = CVDArray([vuln])
-    analyzer = CVDAnalyzer(arr)
+    analyzer = DesiderataExtractor(arr)
 
     # All 12 desiderata should be satisfied
     assert analyzer.desiderata_score[0] == 12
@@ -220,7 +220,7 @@ def test_analyzer_desiderata_score_partial():
     """Partial desiderata score for incomplete history."""
     from datetime import datetime, timedelta
 
-    from vulnstate.analyzer import CVDAnalyzer
+    from vulnstate.transforms.desiderata import DesiderataExtractor
 
     base = datetime(2024, 1, 1)
 
@@ -231,7 +231,7 @@ def test_analyzer_desiderata_score_partial():
     vuln.apply_event(CVDEvent.F, timestamp=base + timedelta(days=10))
 
     arr = CVDArray([vuln])
-    analyzer = CVDAnalyzer(arr)
+    analyzer = DesiderataExtractor(arr)
 
     # F≺P violated, score < 12
     assert analyzer.desiderata_score[0] < 12
@@ -239,7 +239,7 @@ def test_analyzer_desiderata_score_partial():
 
 def test_analyzer_fix_path_labels():
     """Fix path labels from conversion table."""
-    from vulnstate.analyzer import CVDAnalyzer
+    from vulnstate.transforms.desiderata import DesiderataExtractor
 
     vulns = [
         CVDVulnerability(state="vfdpxa"),
@@ -248,7 +248,7 @@ def test_analyzer_fix_path_labels():
         CVDVulnerability(state="VFDpxa"),
     ]
     arr = CVDArray(vulns)
-    analyzer = CVDAnalyzer(arr)
+    analyzer = DesiderataExtractor(arr)
 
     labels = analyzer.fix_path_labels
     assert labels[0] == "No Awareness"
@@ -259,7 +259,7 @@ def test_analyzer_fix_path_labels():
 
 def test_analyzer_threat_labels():
     """Threat state labels from conversion table."""
-    from vulnstate.analyzer import CVDAnalyzer
+    from vulnstate.transforms.desiderata import DesiderataExtractor
 
     vulns = [
         CVDVulnerability(state="VFDpxa"),
@@ -268,7 +268,7 @@ def test_analyzer_threat_labels():
         CVDVulnerability(state="VFDPXA"),
     ]
     arr = CVDArray(vulns)
-    analyzer = CVDAnalyzer(arr)
+    analyzer = DesiderataExtractor(arr)
 
     labels = analyzer.threat_labels
     assert labels[0] == "Latent"
@@ -278,10 +278,10 @@ def test_analyzer_threat_labels():
 
 
 def test_analyzer_importable_from_package():
-    """CVDAnalyzer importable from main package."""
-    from vulnstate import CVDAnalyzer, HistoryValidity
+    """DesiderataExtractor importable from main package."""
+    from vulnstate import DesiderataExtractor, HistoryValidity
 
-    assert CVDAnalyzer is not None
+    assert DesiderataExtractor is not None
     assert HistoryValidity.VALID == 0
 
 
@@ -293,7 +293,7 @@ def test_analyzer_full_workflow():
     """
     from datetime import datetime
 
-    from vulnstate import CVDAnalyzer
+    from vulnstate import DesiderataExtractor
     from vulnstate.constants import HistoryValidity
 
     # Simulate NVD import: only P timestamps
@@ -309,7 +309,7 @@ def test_analyzer_full_workflow():
     assert np.isnat(arr.timestamps.V).all()
 
     # Run analyzer
-    analyzer = CVDAnalyzer(arr)
+    analyzer = DesiderataExtractor(arr)
     analyzer.apply_inferences()
 
     # After inference: V timestamps filled
@@ -328,11 +328,11 @@ def test_analyzer_full_workflow():
 
 def test_explain_pair_violations_single():
     """explain_pair_violations returns violated pair names."""
-    from vulnstate.analyzer import CVDAnalyzer
+    from vulnstate.transforms.desiderata import DesiderataExtractor
 
     # All required pairs violated (none satisfied) - bits 0, 1, 5 NOT set
     pair_mask = 0b0000_0000_0000_0000  # Nothing satisfied
-    violations = CVDAnalyzer.explain_pair_violations(pair_mask)
+    violations = DesiderataExtractor.explain_pair_violations(pair_mask)
 
     assert "V≺F" in violations  # bit 0 not set
     assert "V≺D" in violations  # bit 1 not set
@@ -342,22 +342,22 @@ def test_explain_pair_violations_single():
 
 def test_explain_pair_violations_valid():
     """No violations when all required pairs satisfied."""
-    from vulnstate.analyzer import CVDAnalyzer
+    from vulnstate.transforms.desiderata import DesiderataExtractor
 
     # Required pairs satisfied: V≺F (0), V≺D (1), F≺D (5)
     pair_mask = 0b0000_0000_0010_0011  # bits 0, 1, 5 set
-    violations = CVDAnalyzer.explain_pair_violations(pair_mask)
+    violations = DesiderataExtractor.explain_pair_violations(pair_mask)
 
     assert violations == []
 
 
 def test_explain_pair_violations_partial():
     """Partial violations: some required pairs satisfied, some violated."""
-    from vulnstate.analyzer import CVDAnalyzer
+    from vulnstate.transforms.desiderata import DesiderataExtractor
 
     # V≺F satisfied (bit 0), but V≺D and F≺D violated
     pair_mask = 0b0000_0000_0000_0001  # Only bit 0 set
-    violations = CVDAnalyzer.explain_pair_violations(pair_mask)
+    violations = DesiderataExtractor.explain_pair_violations(pair_mask)
 
     assert "V≺D" in violations  # bit 1 not set
     assert "F≺D" in violations  # bit 5 not set
@@ -369,7 +369,7 @@ def test_explain_pair_violations_with_analyzer():
     """Integration: explain violations from analyzer.pair_mask."""
     from datetime import datetime, timedelta
 
-    from vulnstate.analyzer import CVDAnalyzer
+    from vulnstate.transforms.desiderata import DesiderataExtractor
 
     # Create impossible history: F before V
     base = datetime(2024, 1, 1)
@@ -379,18 +379,18 @@ def test_explain_pair_violations_with_analyzer():
     vuln.state.state_encoded |= 1 << 1
 
     arr = CVDArray([vuln])
-    analyzer = CVDAnalyzer(arr)
+    analyzer = DesiderataExtractor(arr)
 
-    violations = CVDAnalyzer.explain_pair_violations(int(analyzer.pair_mask[0]))
+    violations = DesiderataExtractor.explain_pair_violations(int(analyzer.pair_mask[0]))
     assert "V≺F" in violations  # F happened before V
 
 
 def test_analyze_static_method():
-    """CVDAnalyzer.analyze() returns complete AnalysisResult."""
+    """DesiderataExtractor.analyze() returns complete AnalysisResult."""
     from datetime import datetime, timedelta
 
-    from vulnstate.analyzer import CVDAnalyzer
     from vulnstate.models import AnalysisResult
+    from vulnstate.transforms.desiderata import DesiderataExtractor
 
     base = datetime(2024, 1, 1)
 
@@ -404,7 +404,7 @@ def test_analyze_static_method():
     vuln.apply_event(CVDEvent.A, timestamp=base + timedelta(days=50))
 
     arr = CVDArray([vuln])
-    result = CVDAnalyzer.analyze(arr)
+    result = DesiderataExtractor.analyze(arr)
 
     # Check return type
     assert isinstance(result, AnalysisResult)
@@ -428,10 +428,10 @@ def test_analyze_static_method():
 
 
 def test_analyze_zero_day_detection():
-    """CVDAnalyzer.analyze() detects zero-day scenarios."""
+    """DesiderataExtractor.analyze() detects zero-day scenarios."""
     from datetime import datetime, timedelta
 
-    from vulnstate.analyzer import CVDAnalyzer
+    from vulnstate.transforms.desiderata import DesiderataExtractor
 
     base = datetime(2024, 1, 1)
 
@@ -441,7 +441,7 @@ def test_analyze_zero_day_detection():
     vuln.apply_event(CVDEvent.V, timestamp=base + timedelta(days=10))
 
     arr = CVDArray([vuln])
-    result = CVDAnalyzer.analyze(arr)
+    result = DesiderataExtractor.analyze(arr)
 
     assert result.is_zero_day[0] == True  # noqa: E712
     assert result.is_zero_day_exploit[0] == True  # noqa: E712
@@ -450,10 +450,10 @@ def test_analyze_zero_day_detection():
 
 def test_analyze_slicing():
     """AnalysisResult supports slicing."""
-    from vulnstate.analyzer import CVDAnalyzer
+    from vulnstate.transforms.desiderata import DesiderataExtractor
 
     arr = CVDArray.zeros(10)
-    result = CVDAnalyzer.analyze(arr)
+    result = DesiderataExtractor.analyze(arr)
 
     # Slice first 5
     sliced = result[:5]

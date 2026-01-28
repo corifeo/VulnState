@@ -1,29 +1,113 @@
 """Tests for models.py dataclasses."""
 
+from dataclasses import FrozenInstanceError
+from datetime import datetime
+
 import numpy as np
 import pytest
 
 pytestmark = pytest.mark.unit
 
 
-class TestEventMetadata:
-    """Tests for EventMetadata dataclass."""
+class TestCVSSScore:
+    """Tests for CVSSScore dataclass."""
 
-    def test_event_metadata_creation(self):
-        """EventMetadata holds actor and notes."""
-        from vulnstate.models import EventMetadata
+    def test_cvss_score_creation(self):
+        """CVSSScore holds all CVSS scoring data."""
+        from vulnstate.models import CVSSScore
 
-        meta = EventMetadata(actor="security-team", notes="Found via fuzzing")
-        assert meta.actor == "security-team"
-        assert meta.notes == "Found via fuzzing"
+        score = CVSSScore(
+            version=3.1,
+            base_score=9.8,
+            vector="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+            source="nvd",
+            source_status="Analyzed",
+            reserved_at=None,
+            published_at=datetime(2024, 1, 15),
+            updated_at=datetime(2024, 1, 20),
+            temporal_score=None,
+            environmental_score=None,
+        )
+        assert score.version == 3.1
+        assert score.base_score == 9.8
+        assert score.source == "nvd"
 
-    def test_event_metadata_defaults(self):
-        """EventMetadata fields default to None."""
-        from vulnstate.models import EventMetadata
+    def test_cvss_score_frozen(self):
+        """CVSSScore is immutable (frozen dataclass)."""
+        from vulnstate.models import CVSSScore
 
-        meta = EventMetadata()
-        assert meta.actor is None
-        assert meta.notes is None
+        score = CVSSScore(
+            version=3.1,
+            base_score=9.8,
+            vector="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+            source="nvd",
+            source_status=None,
+            reserved_at=None,
+            published_at=None,
+            updated_at=None,
+            temporal_score=None,
+            environmental_score=None,
+        )
+        with pytest.raises(FrozenInstanceError):
+            score.base_score = 5.0
+
+    def test_cvss_score_to_dict(self):
+        """CVSSScore.to_dict() serializes, omitting None values."""
+        from vulnstate.models import CVSSScore
+
+        score = CVSSScore(
+            version=3.1,
+            base_score=9.8,
+            vector="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+            source="nvd",
+            source_status="Analyzed",
+            reserved_at=None,
+            published_at=datetime(2024, 1, 15),
+            updated_at=None,
+            temporal_score=None,
+            environmental_score=None,
+        )
+        d = score.to_dict()
+        assert d["version"] == 3.1
+        assert d["source"] == "nvd"
+        assert "reserved_at" not in d  # None fields omitted
+        assert "updated_at" not in d  # None fields omitted
+        assert "published_at" in d  # Non-None field included
+
+    def test_cvss_score_from_dict(self):
+        """CVSSScore.from_dict() deserializes, defaulting missing to None."""
+        from vulnstate.models import CVSSScore
+
+        d = {
+            "version": 3.1,
+            "base_score": 9.8,
+            "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+            "source": "nvd",
+        }
+        score = CVSSScore.from_dict(d)
+        assert score.version == 3.1
+        assert score.source_status is None
+
+    def test_cvss_score_parse_vector_v31(self):
+        """CVSSScore.parse_vector() parses CVSS 3.1 vector strings."""
+        from vulnstate.models import CVSSScore
+
+        score = CVSSScore(
+            version=3.1,
+            base_score=9.8,
+            vector="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+            source="nvd",
+            source_status=None,
+            reserved_at=None,
+            published_at=None,
+            updated_at=None,
+            temporal_score=None,
+            environmental_score=None,
+        )
+        metrics = score.parse_vector()
+        assert metrics["AV"] == "N"
+        assert metrics["AC"] == "L"
+        assert metrics["C"] == "H"
 
 
 class TestVulnerabilityIdentity:
@@ -89,76 +173,6 @@ class TestArrayIdentifiers:
         )
         assert ids.cve_id[0] == "CVE-2024-1"
         assert ids.vuln_id[1] == "v2"
-
-
-class TestArrayScoring:
-    """Tests for ArrayScoring dataclass."""
-
-    def test_array_scoring_creation(self):
-        """ArrayScoring holds CVSS scoring data."""
-        from vulnstate.models import ArrayScoring
-
-        n = 3
-        scoring = ArrayScoring(
-            cvss_version=np.array(["3.1", "3.1", "3.0"], dtype=object),
-            cvss_score=np.array([9.8, 7.5, 4.0], dtype=np.float32),
-            cvss_exploitability_score=np.array([3.9, 3.0, 2.0], dtype=np.float32),
-            cvss_impact_score=np.array([5.9, 5.2, 3.6], dtype=np.float32),
-        )
-        assert scoring.cvss_score[0] == 9.8
-        assert len(scoring.cvss_impact_score) == n
-        assert scoring.cvss_version[0] == "3.1"
-
-
-class TestArrayEnrichment:
-    """Tests for ArrayEnrichment dataclass."""
-
-    def test_array_enrichment_creation(self):
-        """ArrayEnrichment holds EPSS and KEV data."""
-        from vulnstate.models import ArrayEnrichment
-
-        enrichment = ArrayEnrichment(
-            epss=np.array([0.95, 0.15], dtype=np.float32),
-            epss_percentile=np.array([0.99, 0.80], dtype=np.float32),
-            kev=np.array([True, False], dtype=bool),
-            kev_date=np.array(["2024-01-15", "NaT"], dtype="datetime64[s]"),
-        )
-        assert enrichment.epss[0] == 0.95
-        assert enrichment.kev[0] == True  # noqa: E712
-
-
-class TestArrayProbabilities:
-    """Tests for ArrayProbabilities dataclass."""
-
-    def test_array_probabilities_creation(self):
-        """ArrayProbabilities holds flexible probability inputs."""
-        from vulnstate.models import ArrayProbabilities
-
-        n = 3
-        probs = ArrayProbabilities(
-            base_threat=np.array([0.5, 0.7, np.nan], dtype=np.float32),
-            xa_split_ratio=np.full(n, 0.5, dtype=np.float32),
-            threat_multiplier=np.ones(n, dtype=np.float32),
-            override_X=np.full(n, np.nan, dtype=np.float32),
-            override_A=np.full(n, np.nan, dtype=np.float32),
-        )
-        assert probs.base_threat[0] == 0.5
-        assert np.isnan(probs.override_X[0])
-
-    def test_array_probabilities_slicing(self):
-        """ArrayProbabilities supports slicing."""
-        from vulnstate.models import ArrayProbabilities
-
-        n = 5
-        probs = ArrayProbabilities(
-            base_threat=np.arange(n, dtype=np.float32) / 10,
-            xa_split_ratio=np.full(n, 0.5, dtype=np.float32),
-            threat_multiplier=np.ones(n, dtype=np.float32),
-            override_X=np.full(n, np.nan, dtype=np.float32),
-            override_A=np.full(n, np.nan, dtype=np.float32),
-        )
-        sliced = probs[:3]
-        assert len(sliced.base_threat) == 3
 
 
 class TestArrayState:
@@ -491,3 +505,205 @@ class TestCachedAnalyticsProperty:
 
         with pytest.raises(AttributeError, match="is_zero_day is read-only"):
             vuln.is_zero_day = True
+
+
+class TestEPSSScore:
+    def test_epss_score_creation(self):
+        from vulnstate.models import EPSSScore
+
+        score = EPSSScore(
+            model=4, probability=0.73, percentile=0.89, computed_at=datetime(2024, 1, 15)
+        )
+        assert score.model == 4
+        assert score.probability == 0.73
+
+    def test_epss_score_roundtrip(self):
+        from vulnstate.models import EPSSScore
+
+        score = EPSSScore(model=4, probability=0.73, percentile=0.89, computed_at=None)
+        d = score.to_dict()
+        restored = EPSSScore.from_dict(d)
+        assert restored == score
+
+
+class TestCWEEntry:
+    def test_cwe_entry_creation(self):
+        from vulnstate.models import CWEEntry
+
+        cwe = CWEEntry(id="CWE-79", source="nvd@nist.gov", primary=True)
+        assert cwe.id == "CWE-79"
+
+    def test_cwe_entry_roundtrip(self):
+        from vulnstate.models import CWEEntry
+
+        cwe = CWEEntry(id="CWE-79", source=None, primary=False)
+        d = cwe.to_dict()
+        restored = CWEEntry.from_dict(d)
+        assert restored == cwe
+
+
+class TestKEVEntry:
+    def test_kev_entry_creation(self):
+        from vulnstate.models import KEVEntry
+
+        kev = KEVEntry(
+            added_at=datetime(2024, 1, 15),
+            due_date=datetime(2024, 2, 15),
+            required_action="Apply updates",
+            ransomware_use=True,
+            notes="Critical vulnerability",
+        )
+        assert kev.ransomware_use is True
+
+    def test_kev_entry_roundtrip(self):
+        from vulnstate.models import KEVEntry
+
+        kev = KEVEntry(
+            added_at=datetime(2024, 1, 15),
+            due_date=None,
+            required_action=None,
+            ransomware_use=None,
+            notes=None,
+        )
+        d = kev.to_dict()
+        restored = KEVEntry.from_dict(d)
+        assert restored == kev
+
+
+class TestExploitReference:
+    def test_exploit_reference_creation(self):
+        from vulnstate.models import ExploitReference
+
+        ref = ExploitReference(
+            source="metasploit", reference="exploit/multi/http/log4j", metadata={"verified": True}
+        )
+        assert ref.source == "metasploit"
+
+    def test_exploit_reference_roundtrip(self):
+        from vulnstate.models import ExploitReference
+
+        ref = ExploitReference(source="exploitdb", reference="12345", metadata=None)
+        d = ref.to_dict()
+        restored = ExploitReference.from_dict(d)
+        assert restored == ref
+
+
+class TestScoreResult:
+    def test_score_result_creation(self):
+        from vulnstate.models import ScoreResult
+
+        result = ScoreResult(
+            cvss_score=9.8,
+            cvss_max=9.8,
+            epss_probability=0.73,
+            epss_percentile=0.89,
+            kev=True,
+            has_exploit=True,
+            cwe_count=2,
+            cpe_count=5,
+            vendors={"apache"},
+            products={"log4j"},
+        )
+        assert result.cvss_score == 9.8
+        assert result.kev is True
+        assert "apache" in result.vendors
+
+
+class TestArraySource:
+    def test_array_source_creation(self):
+        import numpy as np
+
+        from vulnstate.models import ArraySource
+
+        source = ArraySource(
+            cvss_scores=np.array([[], []], dtype=object),
+            epss_scores=np.array([[], []], dtype=object),
+            cwes=np.array([[], []], dtype=object),
+            cpes=np.array([[], []], dtype=object),
+            kev=np.array([None, None], dtype=object),
+            exploits=np.array([[], []], dtype=object),
+        )
+        assert len(source.cvss_scores) == 2
+
+    def test_array_source_slicing(self):
+        import numpy as np
+
+        from vulnstate.models import ArraySource, CVSSScore
+
+        score1 = CVSSScore(
+            version=3.1,
+            base_score=9.8,
+            vector="v",
+            source="nvd",
+            source_status=None,
+            reserved_at=None,
+            published_at=None,
+            updated_at=None,
+            temporal_score=None,
+            environmental_score=None,
+        )
+        source = ArraySource(
+            cvss_scores=np.array([[score1], []], dtype=object),
+            epss_scores=np.array([[], []], dtype=object),
+            cwes=np.array([[], []], dtype=object),
+            cpes=np.array([[], []], dtype=object),
+            kev=np.array([None, None], dtype=object),
+            exploits=np.array([[], []], dtype=object),
+        )
+        sliced = source[0:1]
+        assert len(sliced.cvss_scores) == 1
+        assert sliced.cvss_scores[0][0].base_score == 9.8
+
+
+class TestAnalyticsResult:
+    def test_analytics_result_creation(self):
+        from vulnstate.constants import FixPath, ThreatState
+        from vulnstate.models import AnalyticsResult
+
+        result = AnalyticsResult(
+            fix_path=FixPath.REMEDIATED,
+            threat_state=ThreatState.LATENT,
+            is_zero_day=False,
+            is_zero_day_exploit=False,
+            is_zero_day_attack=False,
+            is_coordinated=True,
+            is_premature_disclosure=False,
+            is_responsible_disclosure=True,
+            has_fix_before_exploit=True,
+            has_fix_before_attack=True,
+            is_private_attack=False,
+            is_weaponized=True,
+            is_mass_exploitation=False,
+            is_fix_available=True,
+            is_fix_deployed=True,
+            is_under_attack=True,
+            fix_lag_days=30.0,
+        )
+        assert result.is_coordinated is True
+        assert result.fix_lag_days == 30.0
+
+
+class TestCVSSMetrics:
+    def test_create_empty(self):
+        from vulnstate.models import CVSSMetrics
+
+        metrics = CVSSMetrics.empty(5)
+        assert len(metrics.attack_vector) == 5
+        assert metrics.attack_vector.dtype == object
+
+    def test_all_fields_same_length(self):
+        import numpy as np
+
+        from vulnstate.models import CVSSMetrics
+
+        metrics = CVSSMetrics(
+            attack_vector=np.array(["N", "L"], dtype=object),
+            attack_complexity=np.array(["L", "H"], dtype=object),
+            privileges_required=np.array(["N", "L"], dtype=object),
+            user_interaction=np.array(["N", "R"], dtype=object),
+            scope=np.array(["U", "C"], dtype=object),
+            confidentiality_impact=np.array(["H", "L"], dtype=object),
+            integrity_impact=np.array(["H", "L"], dtype=object),
+            availability_impact=np.array(["H", "N"], dtype=object),
+        )
+        assert len(metrics.attack_vector) == 2

@@ -1,8 +1,9 @@
 # Archive folder - safety net for deleted code (not committed)
 examples/_archive/
 tests/_archive/
-docs/refs/
-docs/design/
+
+# Documentation (local only, not committed)
+docs/
 
 # Python
 __pycache__/
@@ -121,3 +122,28 @@ docs/plans/_archive/CLEANUP-SUMMARY.md
 
 # Git worktrees
 .worktrees/
+docs/strategy/empirical-api-patterns.md
+docs/strategy/empirical-data-model.md
+docs/strategy/empirical-feature-gap.md
+docs/strategy/empirical-research-insights.md
+docs/strategy/empirical-security-overview.md
+docs/strategy/empirical-vault-integrations.md
+docs/strategy/roadmap.md
+docs/plans/_archive/2026-01-23-nvd-event-inference-design.md
+docs/plans/_archive/2026-01-23-nvd-event-inference-plan.md
+docs/design/2026-01-26-api-v2-architecture.md
+docs/plans/2026-01-27-api-v2-transform-architecture.md
+.serena/memories/competitive_analysis_empirical_security.md
+.claude/session-state.md
+docs/archive/plans/2026-01-13-aggressive-simplification.md
+docs/archive/plans/2026-01-13-dataclass-implementation.md
+docs/archive/plans/2026-01-13-dataclass-refactoring-implementation-v2.md
+docs/archive/plans/2026-01-13-dataclass-refactoring-implementation.md
+docs/archive/plans/2026-01-13-implementation-plan.md
+docs/archive/plans/2026-01-13-systematic-cleanup.md
+docs/archive/plans/2026-01-13-test-specifications.md
+docs/archive/plans/2026-01-14-source-restructure.md
+docs/archive/plans/2026-01-23-nvd-event-inference-design.md
+docs/archive/plans/2026-01-23-nvd-event-inference-plan.md
+docs/archive/plans/CLEANUP-SUMMARY.md
+docs/archive/plans/test-execution-report-2026-01-13.md

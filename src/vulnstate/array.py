@@ -11,16 +11,16 @@ Provides:
 Key features:
 - O(N) vectorized operations
 - Dirty tracking for efficient sync
-- Analytics via CVDAnalyzer.analyze()
+- Analytics via DesiderataExtractor.analyze()
 
 Layer: Batch
 Dependencies: constants.py, states.py, models.py, vulnerability.py
-Used by: io.py, analyzer.py
+Used by: io.py
 """
 
 import warnings
 from collections.abc import Iterator
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional, Union
 
 import numpy as np
@@ -30,27 +30,28 @@ if TYPE_CHECKING:
     import pandas as pd
 
     from .constants import AntiDesiderataBit, DesiderataBit, FixPath, ThreatState
-    from .models import AnalysisResult
+    from .models import AnalysisResult, CVSSMetrics
 
+from . import factories as _factories
 from .constants import (
     CVDEvent,
-    get_all_valid_states,
     get_state_label,
     state_int_to_string,
-    string_to_state_int,
 )
+from .lifecycle import LifecycleNamespace
 from .models import (
-    ArrayAnalytics,
     ArrayCVDAnalytics,
-    ArrayEnrichment,
     ArrayIdentifiers,
     ArrayMetadata,
-    ArrayScoring,
+    ArraySource,
     ArrayState,
     ArrayTimestamps,
+    CVSSScore,
+    KEVEntry,
     compute_history_id,
     compute_pair_mask,
 )
+from .transforms import Transform
 from .vulnerability import CVDVulnerability
 
 
@@ -102,9 +103,6 @@ class CVDArray:
         # Data components (dataclasses)
         self.identifiers = ArrayIdentifiers()  # vuln_id + cve_id
         self.timestamps = ArrayTimestamps()  # Event timestamps (V, F, D, P, X, A)
-        self.scoring = ArrayScoring()
-        self.enrichment = ArrayEnrichment()
-        self.analytics = ArrayAnalytics()  # Computed metrics cache
         self.cvd_analytics = ArrayCVDAnalytics()  # Precomputed pair_mask, history_id
         self._metadata_data = ArrayMetadata()  # Legacy metadata storage
 
@@ -117,29 +115,82 @@ class CVDArray:
         # Dirty tracking
         self._dirty_indices: set[int] = set()
 
-        # Analysis cache (computed on first access)
-        self._analysis_cache: Optional[AnalysisResult] = None
-
         # Bitmask dirty tracking (recompute pair_mask/history_id when timestamps change)
         self._pair_mask_dirty = True
         self._history_id_dirty = True
 
-        # Lazy CVSS metric parsing flag (like _analysis_cache pattern)
-        self._cvss_metrics_parsed = False
+        # ETL: Computed data (populated by _recompute)
+        self._analysis: Optional[AnalysisResult] = None
+        self._cvss_metrics: Optional[CVSSMetrics] = None
+        self._kev_dates: Optional[np.ndarray] = None
 
         # Fixed-size semantics
         self._fixed_size = fixed_size
+
+        # Transform infrastructure (API v2)
+        # _source: Holds object arrays (lists of CVSSScore, EPSSScore, etc.)
+        # _cache: Holds computed numpy arrays from transforms
+        # _transforms: List of registered transforms to run
+        self._source = ArraySource(
+            cvss_scores=np.array([], dtype=object),
+            epss_scores=np.array([], dtype=object),
+            cwes=np.array([], dtype=object),
+            cpes=np.array([], dtype=object),
+            kev=np.array([], dtype=object),
+            exploits=np.array([], dtype=object),
+        )
+        self._cache: dict[str, np.ndarray] = {}
+        self._transforms: list[Transform[Any]] = []
+
+        # Transform registry for lazy dispatch via __getattr__ (API v2)
+        self._transform_registry: dict[str, Any] = {}
+        self._transform_cache: dict[str, Any] = {}
+        self._register_core_transforms()
+
+        # Transform state tracking (API v2)
+        self._is_transformed: bool = False
+        self._transformed_at: Optional[datetime] = None
+        self._stale: bool = False
 
         if vulnerabilities:
             self._from_list(vulnerabilities)
         else:
             self._init_empty()
+            self._recompute()
 
     def _init_empty(self) -> None:
         """Initialize empty arrays (dataclasses already initialized with empty arrays)."""
         # Dataclasses (cvd_state, identifiers, cvd_analytics, scoring, enrichment, analytics)
         # are already initialized with empty arrays in __init__
         pass
+
+    def _register_core_transforms(self) -> None:
+        """Register built-in transforms."""
+        from vulnstate.transforms import CVDStateAnalyzer, ScoreExtractor
+
+        self._transform_registry["scores"] = ScoreExtractor()
+        self._transform_registry["analytics"] = CVDStateAnalyzer()
+
+    def __getattr__(self, name: str) -> Any:
+        """Lazy dispatch to registered transforms."""
+        if name.startswith("_"):
+            raise AttributeError(f"'{type(self).__name__}' has no attribute '{name}'")
+        if name in self._transform_registry:
+            if name not in self._transform_cache:
+                self._transform_cache[name] = self._transform_registry[name].apply(self)
+            return self._transform_cache[name]
+        raise AttributeError(f"No transform '{name}' registered")
+
+    def invalidate(self, name: Optional[str] = None) -> None:
+        """Clear transform cache.
+
+        Args:
+            name: Specific transform to invalidate, or None to clear all.
+        """
+        if name is None:
+            self._transform_cache.clear()
+        else:
+            self._transform_cache.pop(name, None)
 
     def _from_list(self, vulnerabilities: list[CVDVulnerability]) -> None:
         """Build arrays from list of vulnerabilities."""
@@ -156,6 +207,23 @@ class CVDArray:
             [v.state.state_encoded for v in vulnerabilities], dtype=np.uint8
         )
 
+        # Initialize _source with empty lists for each vulnerability (API v2)
+        self._source = ArraySource(
+            cvss_scores=np.empty(n, dtype=object),
+            epss_scores=np.empty(n, dtype=object),
+            cwes=np.empty(n, dtype=object),
+            cpes=np.empty(n, dtype=object),
+            kev=np.empty(n, dtype=object),
+            exploits=np.empty(n, dtype=object),
+        )
+        for i in range(n):
+            self._source.cvss_scores[i] = []
+            self._source.epss_scores[i] = []
+            self._source.cwes[i] = []
+            self._source.cpes[i] = []
+            self._source.kev[i] = None
+            self._source.exploits[i] = []
+
         # Timestamps
         self.timestamps.V = np.full(n, np.datetime64("NaT"), dtype="datetime64[us]")
         self.timestamps.F = np.full(n, np.datetime64("NaT"), dtype="datetime64[us]")
@@ -171,23 +239,6 @@ class CVDArray:
         self.identifiers.cve_id = np.array(
             [v.identity.cve_id for v in vulnerabilities], dtype=object
         )
-
-        # Initialize analytics arrays (will be filled by sync)
-        self.analytics.severities = np.empty(n, dtype=object)
-        self.analytics.fix_path = np.empty(n, dtype=np.uint8)
-        self.analytics.threat_state = np.empty(n, dtype=np.uint8)
-        self.analytics.is_zero_day = np.zeros(n, dtype=bool)
-        self.analytics.is_fix_available = np.zeros(n, dtype=bool)
-        self.analytics.is_fix_deployed = np.zeros(n, dtype=bool)
-        self.analytics.is_weaponized = np.zeros(n, dtype=bool)
-        self.analytics.is_under_attack = np.zeros(n, dtype=bool)
-        self.analytics.is_premature_disclosure = np.zeros(n, dtype=bool)
-        self.analytics.disclosure_window_days = np.full(n, np.nan, dtype=np.float32)
-        self.analytics.fix_lag_days = np.full(n, np.nan, dtype=np.float32)
-        self.analytics.deployment_lag_days = np.full(n, np.nan, dtype=np.float32)
-        self.analytics.violated_orderings_count = np.zeros(n, dtype=np.int32)
-        self.analytics.desiderata_score = np.zeros(n, dtype=np.float32)
-        self.analytics.skill_score = np.full(n, np.nan, dtype=np.float32)
 
         # Trigger initial sync to populate arrays
         self._dirty_indices = set(range(n))
@@ -213,86 +264,14 @@ class CVDArray:
         if not vulnerabilities:
             return
 
-        # Extract cvss_score from scoring dataclass
-        cvss_scores = [
-            v.scoring.cvss_base_score if v.scoring.cvss_base_score is not None else np.nan
-            for v in vulnerabilities
-        ]
-        self._metadata_data.raw["cvss_score"] = np.array(cvss_scores, dtype=np.float32)
-
-        # Extract scoring data (CVSS score only - metrics parsed lazily)
-        self.scoring.cvss_score = np.array(
-            [
-                v.scoring.cvss_base_score if v.scoring.cvss_base_score is not None else np.nan
-                for v in vulnerabilities
-            ],
-            dtype=np.float32,
-        )
-
-        # Store raw CVSS vectors for lazy parsing (avoid parsing during import)
-        self.scoring.cve_vector = np.array(
-            [v.scoring.cve_vector for v in vulnerabilities], dtype=object
-        )
-
-        # Initialize CVSS metric arrays as empty (populated on first access)
-        self.scoring.attack_vector = np.empty(n, dtype=object)
-        self.scoring.attack_complexity = np.empty(n, dtype=object)
-        self.scoring.privileges_required = np.empty(n, dtype=object)
-        self.scoring.user_interaction = np.empty(n, dtype=object)
-        self.scoring.scope = np.empty(n, dtype=object)
-        self.scoring.confidentiality_impact = np.empty(n, dtype=object)
-        self.scoring.integrity_impact = np.empty(n, dtype=object)
-        self.scoring.availability_impact = np.empty(n, dtype=object)
-
-        # Reset lazy parsing flag (metrics not yet parsed)
-        self._cvss_metrics_parsed = False
-
-        # Extract enrichment data
-        self.enrichment.epss = np.array(
-            [
-                v.enrichment.epss if v.enrichment.epss is not None else np.nan
-                for v in vulnerabilities
-            ],
-            dtype=np.float32,
-        )
-
-        self.enrichment.epss_percentile = np.array(
-            [
-                v.enrichment.epss_percentile if v.enrichment.epss_percentile is not None else np.nan
-                for v in vulnerabilities
-            ],
-            dtype=np.float32,
-        )
-
-        self.enrichment.kev = np.array([v.enrichment.kev for v in vulnerabilities], dtype=bool)
-
-        self.enrichment.kev_date = np.array(
-            [
-                (
-                    np.datetime64(v.enrichment.kev_date)
-                    if v.enrichment.kev_date
-                    else np.datetime64("NaT")
-                )
-                for v in vulnerabilities
-            ],
-            dtype="datetime64[s]",
-        )
-
-        # Extract EPSS scores from enrichment dataclass
-        epss_scores = [
-            v.enrichment.epss if v.enrichment.epss is not None else np.nan for v in vulnerabilities
-        ]
-        self._metadata_data.raw["epss"] = np.array(epss_scores, dtype=np.float32)
-
-        # Extract kev flags from enrichment dataclass
-        kev_flags = [v.enrichment.kev for v in vulnerabilities]
-        self._metadata_data.raw["kev"] = np.array(kev_flags, dtype=bool)
-
-        # Extract cve_vector strings from scoring dataclass
-        cve_vectors = [
-            v.scoring.cve_vector if v.scoring.cve_vector else None for v in vulnerabilities
-        ]
-        self._metadata_data.raw["cve_vector"] = np.array(cve_vectors, dtype=object)
+        # Populate _source with enrichment data from vulnerabilities (API v2)
+        for i, v in enumerate(vulnerabilities):
+            self._source.cvss_scores[i] = v.cvss_scores.copy() if v.cvss_scores else []
+            self._source.epss_scores[i] = v.epss_scores.copy() if v.epss_scores else []
+            self._source.cwes[i] = v.cwes.copy() if v.cwes else []
+            self._source.cpes[i] = v.cpes.copy() if v.cpes else []
+            self._source.kev[i] = v.kev_entry
+            self._source.exploits[i] = v.exploits.copy() if v.exploits else []
 
         # Store cve_ids for reconstruction (essential for preserving user-provided IDs)
         cve_ids = [v.identity.cve_id if v.identity.cve_id else None for v in vulnerabilities]
@@ -309,6 +288,147 @@ class CVDArray:
 
         # Restore fixed_size flag (preserve during rebuilds)
         self._fixed_size = was_fixed
+
+        # ETL: Compute derived data
+        self._recompute()
+
+    def _recompute(self) -> None:
+        """Recompute all derived data (ETL approach).
+
+        Called by __init__, _from_list(), and sync().
+        """
+        from .models import CVSSMetrics
+        from .transforms.desiderata import DesiderataExtractor
+
+        n = len(self)
+        if n == 0:
+            self._analysis = DesiderataExtractor.analyze(self, infer=False)
+            self._cvss_metrics = CVSSMetrics.empty(0)
+            self._kev_dates = np.array([], dtype="datetime64[s]")
+            return
+
+        # Compute analysis (infer=False to avoid side effects on timestamps)
+        self._analysis = DesiderataExtractor.analyze(self, infer=False)
+
+        # Parse CVSS vectors
+        self._cvss_metrics = self._parse_cvss_vectors()
+
+        # Extract KEV dates
+        self._kev_dates = self._extract_kev_dates()
+
+    def _parse_cvss_vectors(self) -> "CVSSMetrics":
+        """Parse CVSS vectors into metric arrays."""
+        from .models import CVSSMetrics
+        from .parsers import NVDParser
+
+        n = len(self)
+        metrics = CVSSMetrics.empty(n)
+
+        for i in range(n):
+            cvss_list: list[CVSSScore] = self._source.cvss_scores[i]  # type: ignore[assignment]
+            if cvss_list:
+                vector = cvss_list[0].vector
+                if vector:
+                    parsed = NVDParser.parse_cvss_vector(vector)
+                    metrics.attack_vector[i] = parsed.get("AV")
+                    metrics.attack_complexity[i] = parsed.get("AC")
+                    metrics.privileges_required[i] = parsed.get("PR")
+                    metrics.user_interaction[i] = parsed.get("UI")
+                    metrics.scope[i] = parsed.get("S")
+                    metrics.confidentiality_impact[i] = parsed.get("C")
+                    metrics.integrity_impact[i] = parsed.get("I")
+                    metrics.availability_impact[i] = parsed.get("A")
+
+        return metrics
+
+    def _extract_kev_dates(self) -> np.ndarray:
+        """Extract KEV added dates into array."""
+        n = len(self)
+        dates: np.ndarray = np.empty(n, dtype="datetime64[s]")
+        dates[:] = np.datetime64("NaT")
+
+        for i in range(n):
+            kev_entry: Optional[KEVEntry] = self._source.kev[i]  # type: ignore[assignment]
+            if kev_entry is not None and kev_entry.added_at:
+                dates[i] = np.datetime64(kev_entry.added_at, "s")
+
+        return dates
+
+    # ==================== TRANSFORM INFRASTRUCTURE ====================
+
+    def register_transform(self, transform: Transform[Any]) -> None:
+        """Register a transform to be run on this array.
+
+        Transforms are pluggable computation units that extract data from
+        _source and populate _cache with computed numpy arrays.
+
+        Args:
+            transform: Transform instance implementing the Transform protocol.
+
+        Example:
+            >>> arr = CVDArray.generate(100)
+            >>> arr.register_transform(ScoreExtractor())
+            >>> arr.run_transforms()
+            >>> arr._cache["cvss_score"]  # Populated by transform
+        """
+        self._transforms.append(transform)
+
+    def run_transforms(self) -> None:
+        """Run all registered transforms and populate cache.
+
+        Iterates through registered transforms, calling apply() on each
+        and updating _cache with the returned slots.
+
+        Example:
+            >>> arr.register_transform(ScoreExtractor())
+            >>> arr.run_transforms()
+            >>> print(arr._cache.keys())  # ['cvss_score', 'epss_probability', ...]
+        """
+        for transform in self._transforms:
+            slots = transform.apply(self)
+            self._cache.update(slots)
+
+    def transform(
+        self,
+        only: Optional[list[str]] = None,
+        force: bool = False,
+    ) -> "CVDArray":
+        """Run transforms and compute derived data.
+
+        Args:
+            only: List of transform names to run (None = all)
+            force: If True, re-run even if already transformed and not stale
+
+        Returns:
+            self (for chaining)
+
+        Example:
+            >>> arr = CVDArray.generate(100)
+            >>> arr.transform()  # Run all transforms
+            >>> arr.is_transformed
+            True
+            >>> arr.transform()  # Skips (already transformed, not stale)
+            >>> arr.transform(force=True)  # Forces re-run
+        """
+        # Skip if already transformed, not stale, and not forced
+        if self._is_transformed and not self._stale and not force and only is None:
+            return self
+
+        # Run selected or all transforms
+        transforms_to_run = self._transforms
+        if only:
+            transforms_to_run = [t for t in self._transforms if t.name in only]
+
+        for transform_obj in transforms_to_run:
+            slots = transform_obj.apply(self)
+            self._cache.update(slots)
+
+        # Update state tracking
+        self._is_transformed = True
+        self._stale = False
+        self._transformed_at = datetime.now()
+
+        return self
 
     # ==================== REPRESENTATION ====================
 
@@ -345,7 +465,54 @@ class CVDArray:
         """
         return getattr(self, "_fixed_size", False)
 
+    # ==================== TRANSFORM STATE TRACKING (API v2) ====================
+
+    @property
+    def is_transformed(self) -> bool:
+        """True if transform() has been called at least once."""
+        return self._is_transformed
+
+    @property
+    def stale(self) -> bool:
+        """True if mutations occurred since last transform()."""
+        return self._stale
+
+    @property
+    def transformed_at(self) -> Optional[datetime]:
+        """Timestamp of last transform() call, or None if never called."""
+        return self._transformed_at
+
+    def _require_transform(self, property_name: str) -> None:
+        """Raise TransformNotRunError if transform() has not been called.
+
+        Args:
+            property_name: Name of the property being accessed (for error message).
+
+        Raises:
+            TransformNotRunError: If transform() has not been called.
+        """
+        if not self._is_transformed:
+            from .constants import TransformNotRunError
+
+            raise TransformNotRunError(property_name)
+
     # ==================== DATACLASS PROPERTY ACCESSORS ====================
+
+    @property
+    def lifecycle(self) -> LifecycleNamespace:
+        """CVD lifecycle public API (arr.lifecycle.*).
+
+        Provides human-readable state access:
+        - arr.lifecycle.state - State strings (e.g., "VFdpXa")
+        - arr.lifecycle.summary - Human-readable summaries
+        - arr.lifecycle.fix_path - FixPath enum values
+        - arr.lifecycle.threat_state - ThreatState enum values
+        - arr.lifecycle.timestamps.V/F/D/P/X/A - Event timestamps
+        - arr.lifecycle.desiderata - Desiderata analysis
+        - arr.lifecycle.bitmask - Raw state bitmask (advanced)
+        - arr.lifecycle.pair_mask - Raw pair ordering mask (advanced)
+        """
+        return LifecycleNamespace(self)
 
     @property
     def state_ints(self) -> np.ndarray:
@@ -509,18 +676,6 @@ class CVDArray:
         return self.cvd_analytics.history_id
 
     @property
-    def severities(self) -> np.ndarray:
-        """CVSS severity labels (object array: 'CRITICAL'/'HIGH'/'MEDIUM'/'LOW'/'NONE').
-
-        Returns:
-            np.ndarray: Severity strings derived from CVSS base scores.
-
-        Note:
-            Stored in ArrayAnalytics, updated during sync().
-        """
-        return self.analytics.severities
-
-    @property
     def fix_path(self) -> np.ndarray:
         """VFD dimension as FixPath enum values (uint8 array).
 
@@ -528,7 +683,7 @@ class CVDArray:
             np.ndarray: 0=NO_AWARENESS, 1=VENDOR_AWARE, 3=FIX_READY, 7=REMEDIATED
 
         Note:
-            Computed by CVDAnalyzer on first access, cached until invalidated.
+            Computed by DesiderataExtractor on first access, cached until invalidated.
         """
         return self.analysis.fix_path_int
 
@@ -540,349 +695,105 @@ class CVDArray:
             np.ndarray: 0=LATENT, 1=DISCLOSED, 2=WEAPONIZED, ..., 7=ACTIVE_ATTACK
 
         Note:
-            Computed by CVDAnalyzer on first access, cached until invalidated.
+            Computed by DesiderataExtractor on first access, cached until invalidated.
         """
         return self.analysis.threat_state_int
 
     @property
     def is_zero_day(self) -> np.ndarray:
-        """True if exploit (X) or attack (A) before vendor awareness (V) (bool array).
-
-        Returns:
-            np.ndarray[bool]: Zero-day status for each vulnerability.
-
-        Note:
-            Computed by CVDAnalyzer on first access, cached until invalidated.
-        """
-        return self.analysis.is_zero_day
+        """True if exploit (X) or attack (A) before vendor awareness (V)."""
+        self._require_transform("is_zero_day")
+        return self.lifecycle.desiderata.is_zero_day
 
     @property
     def is_fix_available(self) -> np.ndarray:
-        """True if fix is ready (F event occurred) (bool array).
-
-        Returns:
-            np.ndarray[bool]: Derived directly from state bitmask.
-        """
-        return self.has_event_occurred(CVDEvent.F)
+        """True if fix is ready (F event occurred)."""
+        self._require_transform("is_fix_available")
+        return self.lifecycle.desiderata.is_fix_available
 
     @property
     def is_fix_deployed(self) -> np.ndarray:
-        """True if fix is deployed (D event occurred) (bool array).
-
-        Returns:
-            np.ndarray[bool]: Derived directly from state bitmask.
-        """
-        return self.has_event_occurred(CVDEvent.D)
+        """True if fix is deployed (D event occurred)."""
+        self._require_transform("is_fix_deployed")
+        return self.lifecycle.desiderata.is_fix_deployed
 
     @property
     def is_weaponized(self) -> np.ndarray:
-        """True if public exploit exists (X event occurred) (bool array).
-
-        Returns:
-            np.ndarray[bool]: From AnalysisResult.
-
-        Note:
-            Computed by CVDAnalyzer on first access, cached until invalidated.
-        """
-        return self.analysis.is_weaponized
+        """True if public exploit exists (X event occurred)."""
+        self._require_transform("is_weaponized")
+        return self.lifecycle.desiderata.is_weaponized
 
     @property
     def is_under_attack(self) -> np.ndarray:
-        """True if under active attack (A event occurred) (bool array).
-
-        Returns:
-            np.ndarray[bool]: Derived directly from state bitmask.
-        """
-        return self.has_event_occurred(CVDEvent.A)
+        """True if under active attack (A event occurred)."""
+        self._require_transform("is_under_attack")
+        return self.lifecycle.desiderata.is_under_attack
 
     @property
     def is_premature_disclosure(self) -> np.ndarray:
-        """True if public disclosure (P) before fix ready (F) (bool array).
-
-        Returns:
-            np.ndarray[bool]: From AnalysisResult.
-
-        Note:
-            Computed by CVDAnalyzer on first access, cached until invalidated.
-        """
-        return self.analysis.is_premature_disclosure
+        """True if public disclosure (P) before fix ready (F)."""
+        self._require_transform("is_premature_disclosure")
+        return self.lifecycle.desiderata.is_premature_disclosure
 
     @property
     def is_zero_day_exploit(self) -> np.ndarray:
-        """
-        Check if exploit public before vendor awareness (zero-day exploit).
-
-        True if X event occurred before V event. Indicates attacker had
-        working exploit before vendor knew vulnerability existed.
-
-        Uses precomputed pair_mask for O(1) lookup (bit 3: V≺X).
-
-        Returns:
-            Boolean array indicating zero-day exploit status
-
-        Examples:
-            >>> arr.is_zero_day_exploit
-            array([False, True, False, ...], dtype=bool)
-        """
-        # V≺X (bit 3): if clear, then X before V (zero-day exploit)
-        # Check if both events occurred first
-        v_times = self.V_timestamps
-        x_times = self.X_timestamps
-        has_both = ~np.isnat(v_times) & ~np.isnat(x_times)
-
-        # Use pair_mask: bit 3 clear means X before V
-        result: np.ndarray = np.zeros(len(self), dtype=bool)
-        result[has_both] = (self.pair_mask[has_both] & (1 << 3)) == 0
-        return result
+        """True if exploit (X) before vendor awareness (V)."""
+        self._require_transform("is_zero_day_exploit")
+        return self.lifecycle.desiderata.is_zero_day_exploit
 
     @property
     def is_zero_day_attack(self) -> np.ndarray:
-        """
-        Check if attacks before vendor awareness (zero-day attack).
-
-        True if A event occurred before V event. Indicates attacks were
-        observed before vendor knew vulnerability existed.
-
-        Uses precomputed pair_mask for O(1) lookup (bit 4: V≺A).
-
-        Returns:
-            Boolean array indicating zero-day attack status
-
-        Examples:
-            >>> arr.is_zero_day_attack
-            array([False, True, False, ...], dtype=bool)
-        """
-        # V≺A (bit 4): if clear, then A before V (zero-day attack)
-        # Check if both events occurred first
-        v_times = self.V_timestamps
-        a_times = self.A_timestamps
-        has_both = ~np.isnat(v_times) & ~np.isnat(a_times)
-
-        # Use pair_mask: bit 4 clear means A before V
-        result: np.ndarray = np.zeros(len(self), dtype=bool)
-        result[has_both] = (self.pair_mask[has_both] & (1 << 4)) == 0
-        return result
+        """True if attack (A) before vendor awareness (V)."""
+        self._require_transform("is_zero_day_attack")
+        return self.lifecycle.desiderata.is_zero_day_attack
 
     @property
     def is_coordinated(self) -> np.ndarray:
-        """
-        Check if vendor aware before public disclosure (coordinated disclosure).
-
-        True if V event occurred before P event. Indicates proper coordination
-        where vendor had awareness before public disclosure.
-
-        Uses precomputed pair_mask for O(1) lookup (bit 2: V≺P).
-
-        Returns:
-            Boolean array indicating coordinated disclosure status
-
-        Examples:
-            >>> arr.is_coordinated
-            array([True, False, True, ...], dtype=bool)
-        """
-        # V≺P (bit 2): if set, then V before P (coordinated)
-        # Check if both events occurred first
-        v_times = self.V_timestamps
-        p_times = self.P_timestamps
-        has_both = ~np.isnat(v_times) & ~np.isnat(p_times)
-
-        # Use pair_mask: bit 2 set means V before P
-        result: np.ndarray = np.zeros(len(self), dtype=bool)
-        result[has_both] = (self.pair_mask[has_both] & (1 << 2)) != 0
-        return result
+        """True if vendor aware (V) before public disclosure (P)."""
+        self._require_transform("is_coordinated")
+        return self.lifecycle.desiderata.is_coordinated
 
     @property
     def is_responsible_disclosure(self) -> np.ndarray:
-        """
-        Check if V→F→P ordering maintained (responsible disclosure).
-
-        True if vendor awareness (V) preceded fix ready (F) which preceded
-        public disclosure (P). This is the ideal disclosure sequence.
-
-        Uses precomputed pair_mask for O(1) lookup (bits 0, 6: V≺F and F≺P).
-
-        Returns:
-            Boolean array indicating responsible disclosure status
-
-        Examples:
-            >>> arr.is_responsible_disclosure
-            array([True, False, True, ...], dtype=bool)
-        """
-        # V≺F (bit 0) and F≺P (bit 6): both must be set
-        # Check if all three events occurred first
-        v_times = self.V_timestamps
-        f_times = self.F_timestamps
-        p_times = self.P_timestamps
-        has_all = ~np.isnat(v_times) & ~np.isnat(f_times) & ~np.isnat(p_times)
-
-        # Use pair_mask: bits 0 and 6 must both be set
-        result: np.ndarray = np.zeros(len(self), dtype=bool)
-        mask_vf = (self.pair_mask[has_all] & (1 << 0)) != 0  # V≺F
-        mask_fp = (self.pair_mask[has_all] & (1 << 6)) != 0  # F≺P
-        result[has_all] = mask_vf & mask_fp
-        return result
+        """True if V→F→P ordering maintained."""
+        self._require_transform("is_responsible_disclosure")
+        return self.lifecycle.desiderata.is_responsible_disclosure
 
     @property
     def has_fix_before_exploit(self) -> np.ndarray:
-        """
-        Check if fix ready before exploit public.
-
-        True if F event occurred before X event. Indicates vendor had
-        fix ready before exploit became publicly available.
-
-        Uses precomputed pair_mask for O(1) lookup (bit 7: F≺X).
-
-        Returns:
-            Boolean array indicating fix-before-exploit status
-
-        Examples:
-            >>> arr.has_fix_before_exploit
-            array([True, False, True, ...], dtype=bool)
-        """
-        # F≺X (bit 7): if set, then F before X
-        # Check if both events occurred first
-        f_times = self.F_timestamps
-        x_times = self.X_timestamps
-        has_both = ~np.isnat(f_times) & ~np.isnat(x_times)
-
-        # Use pair_mask: bit 7 set means F before X
-        result: np.ndarray = np.zeros(len(self), dtype=bool)
-        result[has_both] = (self.pair_mask[has_both] & (1 << 7)) != 0
-        return result
+        """True if fix ready (F) before exploit public (X)."""
+        self._require_transform("has_fix_before_exploit")
+        return self.lifecycle.desiderata.has_fix_before_exploit
 
     @property
     def has_fix_before_attack(self) -> np.ndarray:
-        """
-        Check if fix ready before attacks observed.
-
-        True if F event occurred before A event. Indicates vendor had
-        fix ready before attacks were observed.
-
-        Uses precomputed pair_mask for O(1) lookup (bit 8: F≺A).
-
-        Returns:
-            Boolean array indicating fix-before-attack status
-
-        Examples:
-            >>> arr.has_fix_before_attack
-            array([True, False, True, ...], dtype=bool)
-        """
-        # F≺A (bit 8): if set, then F before A
-        # Check if both events occurred first
-        f_times = self.F_timestamps
-        a_times = self.A_timestamps
-        has_both = ~np.isnat(f_times) & ~np.isnat(a_times)
-
-        # Use pair_mask: bit 8 set means F before A
-        result: np.ndarray = np.zeros(len(self), dtype=bool)
-        result[has_both] = (self.pair_mask[has_both] & (1 << 8)) != 0
-        return result
+        """True if fix ready (F) before attacks observed (A)."""
+        self._require_transform("has_fix_before_attack")
+        return self.lifecycle.desiderata.has_fix_before_attack
 
     @property
     def has_deployment_before_exploit(self) -> np.ndarray:
-        """
-        Check if fix deployed before exploit public.
-
-        True if D event occurred before X event. Indicates fix was
-        deployed before exploit became publicly available.
-
-        Uses precomputed pair_mask for O(1) lookup (bit 10: D≺X).
-
-        Returns:
-            Boolean array indicating deployment-before-exploit status
-
-        Examples:
-            >>> arr.has_deployment_before_exploit
-            array([True, False, True, ...], dtype=bool)
-        """
-        # D≺X (bit 10): if set, then D before X
-        # Check if both events occurred first
-        d_times = self.D_timestamps
-        x_times = self.X_timestamps
-        has_both = ~np.isnat(d_times) & ~np.isnat(x_times)
-
-        # Use pair_mask: bit 10 set means D before X
-        result: np.ndarray = np.zeros(len(self), dtype=bool)
-        result[has_both] = (self.pair_mask[has_both] & (1 << 10)) != 0
-        return result
+        """True if fix deployed (D) before exploit public (X)."""
+        self._require_transform("has_deployment_before_exploit")
+        return self.lifecycle.desiderata.has_deployment_before_exploit
 
     @property
     def has_deployment_before_attack(self) -> np.ndarray:
-        """
-        Check if fix deployed before attacks observed.
-
-        True if D event occurred before A event. Indicates fix was
-        deployed before attacks were observed.
-
-        Uses precomputed pair_mask for O(1) lookup (bit 11: D≺A).
-
-        Returns:
-            Boolean array indicating deployment-before-attack status
-
-        Examples:
-            >>> arr.has_deployment_before_attack
-            array([True, False, True, ...], dtype=bool)
-        """
-        # D≺A (bit 11): if set, then D before A
-        # Check if both events occurred first
-        d_times = self.D_timestamps
-        a_times = self.A_timestamps
-        has_both = ~np.isnat(d_times) & ~np.isnat(a_times)
-
-        # Use pair_mask: bit 11 set means D before A
-        result: np.ndarray = np.zeros(len(self), dtype=bool)
-        result[has_both] = (self.pair_mask[has_both] & (1 << 11)) != 0
-        return result
+        """True if fix deployed (D) before attacks observed (A)."""
+        self._require_transform("has_deployment_before_attack")
+        return self.lifecycle.desiderata.has_deployment_before_attack
 
     @property
     def is_private_attack(self) -> np.ndarray:
-        """
-        Check if attacks without public exploit (targeted/private attack).
-
-        True if A event occurred without X event. Indicates targeted
-        attacks without publicly available exploit code.
-
-        Returns:
-            Boolean array indicating private attack status
-
-        Examples:
-            >>> arr.is_private_attack
-            array([False, True, False, ...], dtype=bool)
-        """
-        x_times = self.X_timestamps
-        a_times = self.A_timestamps
-
-        # A occurred but not X
-        has_a = ~np.isnat(a_times)
-        has_x = ~np.isnat(x_times)
-
-        result: np.ndarray = has_a & ~has_x
-        return result
+        """True if attacks (A) without public exploit (X)."""
+        self._require_transform("is_private_attack")
+        return self.lifecycle.desiderata.is_private_attack
 
     @property
     def is_mass_exploitation(self) -> np.ndarray:
-        """
-        Check if both exploit public and attacks observed (mass exploitation).
-
-        True if both X and A events occurred. Indicates widespread
-        exploitation with both public exploit code and observed attacks.
-
-        Returns:
-            Boolean array indicating mass exploitation status
-
-        Examples:
-            >>> arr.is_mass_exploitation
-            array([False, True, False, ...], dtype=bool)
-        """
-        x_times = self.X_timestamps
-        a_times = self.A_timestamps
-
-        # Both X and A occurred
-        has_x = ~np.isnat(x_times)
-        has_a = ~np.isnat(a_times)
-
-        result: np.ndarray = has_x & has_a
-        return result
+        """True if both exploit public (X) and attacks observed (A)."""
+        self._require_transform("is_mass_exploitation")
+        return self.lifecycle.desiderata.is_mass_exploitation
 
     @property
     def disclosure_window_days(self) -> np.ndarray:
@@ -892,7 +803,7 @@ class CVDArray:
             np.ndarray[float32]: Window in days. NaN if V or P not occurred.
 
         Note:
-            Computed by CVDAnalyzer on first access, cached until invalidated.
+            Computed by DesiderataExtractor on first access, cached until invalidated.
         """
         return self.analysis.disclosure_window_days
 
@@ -904,7 +815,7 @@ class CVDArray:
             np.ndarray[float32]: Lag in days. NaN if V or F not occurred.
 
         Note:
-            Computed by CVDAnalyzer on first access, cached until invalidated.
+            Computed by DesiderataExtractor on first access, cached until invalidated.
         """
         return self.analysis.fix_lag_days
 
@@ -916,23 +827,9 @@ class CVDArray:
             np.ndarray[float32]: Lag in days. NaN if F or D not occurred.
 
         Note:
-            Computed by CVDAnalyzer on first access, cached until invalidated.
+            Computed by DesiderataExtractor on first access, cached until invalidated.
         """
         return self.analysis.deployment_lag_days
-
-    @property
-    def violated_orderings_count(self) -> np.ndarray:
-        """Number of violated event ordering constraints (int32, 0-12).
-
-        Returns:
-            np.ndarray[int32]: Count of set bits in anti_desiderata_mask.
-        """
-        # Count bits set in anti_desiderata_mask
-        mask = self.analysis.anti_desiderata_mask
-        count = np.zeros(len(mask), dtype=np.int32)
-        for i in range(12):  # 12 desiderata pairs
-            count += ((mask >> i) & 1).astype(np.int32)
-        return count
 
     @property
     def desiderata_score(self) -> np.ndarray:
@@ -942,7 +839,7 @@ class CVDArray:
             np.ndarray[float32]: desiderata_count / 12 for each vulnerability.
 
         Note:
-            Computed by CVDAnalyzer on first access, cached until invalidated.
+            Computed by DesiderataExtractor on first access, cached until invalidated.
         """
         return self.analysis.desiderata_score
 
@@ -950,7 +847,7 @@ class CVDArray:
     def desiderata_mask(self) -> np.ndarray:
         """Get desiderata satisfaction as uint16 bitmask array.
 
-        Reads from AnalysisResult.desiderata_mask computed by CVDAnalyzer.
+        Reads from AnalysisResult.desiderata_mask computed by DesiderataExtractor.
         Each bit corresponds to a DesiderataBit. Use bitwise ops for filtering:
             arr.desiderata_mask & (1 << DesiderataBit.D1_V_P)
         """
@@ -965,65 +862,25 @@ class CVDArray:
                 Complement of desiderata_mask.
 
         Note:
-            Computed by CVDAnalyzer on first access, cached until invalidated.
+            Computed by DesiderataExtractor on first access, cached until invalidated.
         """
         return self.analysis.anti_desiderata_mask
 
     def get_satisfied_desiderata(self) -> list[list[str]]:
-        """Get labels of satisfied desiderata for each vulnerability.
-
-        Returns:
-            List of lists, one per vulnerability, containing human-readable
-            labels for satisfied desiderata (e.g., "Coordinated Disclosure").
-        """
-        from .constants import get_desiderata_labels
-
-        return [get_desiderata_labels(int(m)) for m in self.desiderata_mask]
+        """Get labels of satisfied desiderata for each vulnerability."""
+        return self.lifecycle.desiderata.get_satisfied_labels()
 
     def get_violated_desiderata(self) -> list[list[str]]:
-        """Get labels of violated desiderata (anti-desiderata) for each vulnerability.
-
-        Returns:
-            List of lists, one per vulnerability, containing human-readable
-            labels for violations (e.g., "Zero-Day Exploit").
-        """
-        from .constants import get_anti_desiderata_labels
-
-        return [get_anti_desiderata_labels(int(m)) for m in self.anti_desiderata_mask]
+        """Get labels of violated desiderata for each vulnerability."""
+        return self.lifecycle.desiderata.get_violated_labels()
 
     def where_desiderata_satisfied(self, *desiderata: "DesiderataBit") -> np.ndarray:
-        """Return boolean mask where all specified desiderata are satisfied.
-
-        Args:
-            *desiderata: DesiderataBit values to check (AND logic)
-
-        Returns:
-            Boolean array where True means all specified desiderata satisfied.
-
-        Example:
-            >>> from vulnstate.constants import DesiderataBit
-            >>> coordinated = arr.where_desiderata_satisfied(DesiderataBit.D1_V_P)
-            >>> arr[coordinated]  # Filter to coordinated disclosures
-        """
-        required = sum(1 << d for d in desiderata)
-        return (self.desiderata_mask & required) == required
+        """Return boolean mask where all specified desiderata are satisfied."""
+        return self.lifecycle.desiderata.where_satisfied(*desiderata)
 
     def where_desiderata_violated(self, *anti_desiderata: "AntiDesiderataBit") -> np.ndarray:
-        """Return boolean mask where all specified anti-desiderata are violated.
-
-        Args:
-            *anti_desiderata: AntiDesiderataBit values to check (AND logic)
-
-        Returns:
-            Boolean array where True means all specified anti-desiderata violated.
-
-        Example:
-            >>> from vulnstate.constants import AntiDesiderataBit
-            >>> zero_days = arr.where_desiderata_violated(AntiDesiderataBit.U2_X_V)
-            >>> arr[zero_days]  # Filter to zero-day exploits
-        """
-        required = sum(1 << a for a in anti_desiderata)
-        return (self.anti_desiderata_mask & required) == required
+        """Return boolean mask where all specified anti-desiderata are violated."""
+        return self.lifecycle.desiderata.where_violated(*anti_desiderata)
 
     @property
     def skill_score(self) -> np.ndarray:
@@ -1033,7 +890,7 @@ class CVDArray:
             np.ndarray[float32]: Weighted desiderata score. NaN if insufficient data.
 
         Note:
-            Computed by CVDAnalyzer on first access, cached until invalidated.
+            Computed by DesiderataExtractor on first access, cached until invalidated.
         """
         return self.analysis.skill_score
 
@@ -1166,6 +1023,18 @@ class CVDArray:
             subset._metadata_data.raw = {key: arr[idx] for key, arr in self._metadata_raw.items()}
             subset._metadata_encoders = self._metadata_encoders  # Share encoder references
 
+            # Slice transform infrastructure (API v2)
+            subset._source = self._source[idx]
+            subset._cache = {k: v[idx] for k, v in self._cache.items()}
+            subset._transforms = self._transforms.copy()
+            subset._transform_registry = self._transform_registry.copy()
+            subset._transform_cache = {}  # Clear lazy cache, will recompute
+
+            # Copy transform state (API v2)
+            subset._is_transformed = self._is_transformed
+            subset._transformed_at = self._transformed_at
+            subset._stale = False  # Fresh subset starts not stale
+
             return subset
 
         else:
@@ -1216,17 +1085,8 @@ class CVDArray:
     # ==================== VECTORIZED STATE QUERIES ====================
 
     def has_event_occurred(self, event: CVDEvent) -> np.ndarray:
-        """
-        Check which vulnerabilities have event occurred (vectorized).
-
-        Args:
-            event: Event to check
-
-        Returns:
-            Boolean array of shape (N,) where True = event occurred
-        """
-        bit_pos = event
-        return (self.state_ints & (1 << bit_pos)) != 0
+        """Check which vulnerabilities have event occurred (vectorized)."""
+        return self.lifecycle.has_event(event)
 
     def event_year(self, event: CVDEvent) -> np.ndarray:
         """Year of event occurrence as int array (0 where event not occurred).
@@ -1391,16 +1251,6 @@ class CVDArray:
         return result
 
     @property
-    def event_occurrence_counts(self) -> dict[str, int]:
-        """
-        Count how many vulnerabilities have each event occurred.
-
-        Returns:
-            Dictionary mapping event names to counts
-        """
-        return {event.name: int(self.has_event_occurred(event).sum()) for event in CVDEvent}
-
-    @property
     def event_occurrence_rates(self) -> dict[str, float]:
         """
         Percentage of vulnerabilities with each event occurred.
@@ -1447,25 +1297,32 @@ class CVDArray:
         index: int,
         event: CVDEvent,
         timestamp: Optional[datetime] = None,
+        mask: Optional[np.ndarray] = None,
         sync: bool = False,
     ) -> "CVDArray":
         """
-        Apply event to vulnerability at index.
+        Apply event to vulnerability at index, or to multiple vulnerabilities if mask provided.
 
         Args:
-            index: Index of vulnerability
+            index: Index of vulnerability (ignored if mask is provided)
             event: Event to apply
-            timestamp: Optional timestamp
+            timestamp: Optional timestamp for the event
+            mask: Optional boolean mask - if provided, applies event to all indices where True
             sync: If True, sync immediately after applying
 
         Returns:
             self (for chaining)
         """
-        # Apply to live object
-        self._vulnerabilities[index].apply_event(event, timestamp=timestamp)
-
-        # Mark as dirty
-        self._dirty_indices.add(index)
+        if mask is not None:
+            # Batch mode: apply to all indices where mask is True
+            indices = np.where(mask)[0]
+            for idx in indices:
+                self._vulnerabilities[idx].apply_event(event, timestamp=timestamp)
+                self._dirty_indices.add(idx)
+        else:
+            # Single index mode
+            self._vulnerabilities[index].apply_event(event, timestamp=timestamp)
+            self._dirty_indices.add(index)
 
         # Auto-sync if requested
         if sync:
@@ -1515,15 +1372,17 @@ class CVDArray:
                     else:
                         getattr(self.timestamps, attr_name)[idx] = np.datetime64("NaT")
 
-            # Sync enrichment data (EPSS, KEV) - only if arrays are initialized
-            if len(self.enrichment.epss) > idx:
-                if vuln.enrichment.epss is not None:
-                    self.enrichment.epss[idx] = vuln.enrichment.epss
-                if vuln.enrichment.epss_percentile is not None:
-                    self.enrichment.epss_percentile[idx] = vuln.enrichment.epss_percentile
-                self.enrichment.kev[idx] = vuln.enrichment.kev
-                if vuln.enrichment.kev_date is not None:
-                    self.enrichment.kev_date[idx] = np.datetime64(vuln.enrichment.kev_date, "s")
+            # Sync enrichment data to _source (API v2)
+            if len(self._source.cvss_scores) > idx:
+                self._source.cvss_scores[idx] = vuln.cvss_scores.copy() if vuln.cvss_scores else []
+                self._source.epss_scores[idx] = vuln.epss_scores.copy() if vuln.epss_scores else []
+                self._source.cwes[idx] = vuln.cwes.copy() if vuln.cwes else []
+                self._source.cpes[idx] = vuln.cpes.copy() if vuln.cpes else []
+                self._source.kev[idx] = vuln.kev_entry
+                self._source.exploits[idx] = vuln.exploits.copy() if vuln.exploits else []
+
+            # Invalidate transform cache (data changed)
+            self._cache.clear()
 
         # Clear dirty flags
         self._dirty_indices -= to_sync
@@ -1532,6 +1391,12 @@ class CVDArray:
         if to_sync:
             self._pair_mask_dirty = True
             self._history_id_dirty = True
+            # ETL: Recompute derived data
+            self._recompute()
+
+            # Mark stale after mutations synced (API v2)
+            if self._is_transformed:
+                self._stale = True
 
         return self
 
@@ -1550,22 +1415,13 @@ class CVDArray:
 
     @property
     def analysis(self) -> "AnalysisResult":
+        """Computed analytics for this array.
+
+        Populated at construction and updated by sync()/apply_event_batch().
         """
-        Computed analytics for this array (lazy, cached).
-
-        Returns AnalysisResult dataclass with all computed analytics.
-        Automatically triggers CVDAnalyzer.analyze() on first access.
-        Cache is invalidated when array is modified.
-
-        Returns:
-            AnalysisResult with all 11 groups of analytics
-        """
-        from .analyzer import CVDAnalyzer
-
-        # Check if cached and valid
-        if self._analysis_cache is None:
-            self._analysis_cache = CVDAnalyzer.analyze(self)
-        return self._analysis_cache
+        if self._analysis is None:
+            self._recompute()
+        return self._analysis
 
     def invalidate_analysis(self) -> None:
         """Invalidate the cached analysis, forcing recomputation on next access.
@@ -1574,7 +1430,7 @@ class CVDArray:
             Call after modifying state_ints or timestamps directly (bypassing
             apply_event/sync). The analysis property will recompute automatically.
         """
-        self._analysis_cache = None
+        self._analysis = None
 
     def reanalyze(self, infer: bool = True) -> "AnalysisResult":
         """Force re-run of analysis after manual data changes.
@@ -1606,10 +1462,10 @@ class CVDArray:
         Returns:
             Fresh AnalysisResult with all computed analytics
         """
-        from .analyzer import CVDAnalyzer
+        from .transforms.desiderata import DesiderataExtractor
 
-        self._analysis_cache = CVDAnalyzer.analyze(self, infer=infer)
-        return self._analysis_cache
+        self._analysis = DesiderataExtractor.analyze(self, infer=infer)
+        return self._analysis
 
     def apply_event_batch(
         self,
@@ -1617,163 +1473,25 @@ class CVDArray:
         mask: Optional[np.ndarray] = None,
         timestamp: Optional[datetime] = None,
     ) -> np.ndarray:
-        """
-        Apply event to multiple vulnerabilities at once (vectorized).
-
-        Validates V→F→D constraints before applying.
-
-        Args:
-            event: Event to apply
-            mask: Optional boolean mask (N,) indicating which to update.
-                  If None, applies to all that don't have event and satisfy constraints.
-            timestamp: Timestamp for the event (default: now)
-
-        Returns:
-            Boolean mask (N,) indicating which vulnerabilities were updated
-        """
-        if mask is None:
-            # Create mask: vulnerabilities that don't have event
-            mask = ~self.has_event_occurred(event)
-
-            # Apply V→F→D constraints (vectorized version of CVDEvent.validate_vfd_constraint)
-            if event == CVDEvent.F:
-                # F requires V
-                mask &= self.has_event_occurred(CVDEvent.V)
-            elif event == CVDEvent.D:
-                # D requires F
-                mask &= self.has_event_occurred(CVDEvent.F)
-
-        # Apply event by setting bit
-        bit_pos = event
-        self.state_ints[mask] |= 1 << bit_pos
-
-        # Update timestamps - always update _event_timestamps_absolute
-        # (if in delta mode, optimization will be re-applied by user)
-        ts = timestamp or datetime.now()
-        ts_dt64 = np.datetime64(ts, "us")
-
-        # Only set where not already set
-        existing = self._event_timestamps_absolute[event]
-        new_ts = np.where(np.isnat(existing) & mask, ts_dt64, existing)
-        self._event_timestamps_absolute[event] = new_ts
-
-        return mask
-
-    # ==================== CONVERSIONS ====================
-
-    def to_matrix(self) -> np.ndarray:
-        """
-        Convert all states to binary feature matrix for ML.
-
-        Each row is a vulnerability, each column is an event (V, F, D, P, X, A).
-
-        Returns:
-            np.ndarray of shape (N, 6) with dtype=uint8
-            Values are 0 or 1 indicating event occurrence
-        """
-        n = len(self)
-        matrix = np.zeros((n, 6), dtype=np.uint8)
-
-        for i, event in enumerate(CVDEvent):
-            matrix[:, i] = self.has_event_occurred(event).astype(np.uint8)
-
-        return matrix
-
-    @staticmethod
-    def from_matrix(matrix: np.ndarray, vuln_ids: Optional[list[str]] = None) -> "CVDArray":
-        """
-        Create CVDArray from binary feature matrix.
-
-        Args:
-            matrix: np.ndarray of shape (N, 6) with binary values
-            vuln_ids: Optional list of vulnerability IDs
-
-        Returns:
-            New CVDArray instance
-
-        Raises:
-            ValueError: If matrix shape is not (N, 6)
-        """
-        # Validate matrix shape
-        if matrix.ndim != 2 or matrix.shape[1] != 6:
-            raise ValueError(f"Matrix must have shape (N, 6) for 6 CVD events, got {matrix.shape}")
-        n = matrix.shape[0]
-        arr = CVDArray()
-
-        # Convert rows to state integers
-        states = np.zeros(n, dtype=np.uint8)
-        for i, event in enumerate(CVDEvent):
-            states = (states | (matrix[:, i].astype(np.uint8) << int(event))).astype(np.uint8)
-
-        # Create vulnerability objects from states
-        vulnerabilities = []
-        ids = vuln_ids if vuln_ids else [f"V{i}" for i in range(n)]
-        for i, state_int in enumerate(states):
-            vuln = CVDVulnerability(ids[i])
-            # Set state by applying events based on state bits
-            for event in CVDEvent:
-                if state_int & (1 << event):
-                    vuln.apply_event(event, timestamp=None)
-            vulnerabilities.append(vuln)
-
-        arr._vulnerabilities = np.array(vulnerabilities, dtype=object)
-        arr.state_ints = states
-        arr.vuln_ids = np.array(ids, dtype=object)
-        arr._metadata_data.event_timestamps_absolute = {
-            event: np.full(n, np.datetime64("NaT"), dtype="datetime64[us]") for event in CVDEvent
-        }
-        arr._metadata_data.raw = {}
-
-        return arr
+        """Apply event to multiple vulnerabilities at once (vectorized)."""
+        return self.lifecycle.apply_event(event, mask, timestamp)
 
     # ==================== ANALYSIS & DISPLAY ====================
 
     @property
     def summary(self) -> str:
-        """
-        Formatted summary of entire vulnerability array.
+        """Formatted summary of entire vulnerability array."""
+        from .formatting import CVDFormatter
 
-        Returns:
-            Multi-line string with statistics
-        """
-        n = len(self)
-        if n == 0:
-            return "Empty CVDArray (0 vulnerabilities)"
-
-        lines = ["CVDArray Summary", "=" * 50, f"Total Vulnerabilities: {n}", ""]
-
-        # State distribution
-        state_counts = self.count_by_state()
-        lines.append("State Distribution:")
-        for state, count in sorted(state_counts.items()):
-            pct = count / n * 100
-            lines.append(f"  {state}: {count} ({pct:.1f}%)")
-        lines.append("")
-
-        # Event occurrence rates
-        lines.append("Event Occurrence Rates:")
-        for event_name, pct in self.event_occurrence_rates.items():
-            lines.append(f"  {event_name}: {pct:.1f}%")
-
-        # Terminal states
-        terminal_count = int(self.terminal_mask.sum())
-        lines.append(f"\nComplete (VFDPXA): {terminal_count}/{n} ({terminal_count / n * 100:.1f}%)")
-
-        return "\n".join(lines)
+        return CVDFormatter.array_summary_text(self)
 
     # ==================== BATCH SERIALIZATION METHODS ====================
 
     def to_dict_batch(self, include_computed: bool = False) -> list[dict[str, Any]]:
-        """
-        Convert all vulnerabilities to list of dicts.
+        """Convert all vulnerabilities to list of dicts."""
+        from .io import CVDIO
 
-        Args:
-            include_computed: Include computed properties in each dict
-
-        Returns:
-            List of vulnerability dictionaries
-        """
-        return [vuln.to_dict(include_computed=include_computed) for vuln in self]
+        return CVDIO.array_to_dicts(self, include_computed)
 
     def to_dataframe(
         self,
@@ -1782,60 +1500,25 @@ class CVDArray:
         explode_cvss: bool = True,
         explode_metadata: bool = True,
     ) -> "pd.DataFrame":
-        """
-        Convert array to pandas DataFrame with comprehensive data.
-
-        Args:
-            include_analytics: Include computed metrics (default True)
-            include_events: Add V, F, D, P, X, A columns as 0/1 flags (default False)
-            explode_cvss: CVSS vector as separate columns (default True)
-            explode_metadata: Unpack metadata dicts into columns (default True)
-
-        Returns:
-            pandas DataFrame with one row per vulnerability
-
-        Example:
-            >>> df = arr.to_dataframe(include_events=True)
-            >>> df[['cve_id', 'V', 'F', 'D', 'P', 'X', 'A']].head()
-        """
-        from vulnstate.io import CVDIO
+        """Convert array to pandas DataFrame."""
+        from .io import CVDIO
 
         return CVDIO.to_dataframe(
             self, include_analytics, include_events, explode_cvss, explode_metadata
         )
 
     def to_json_batch(self, filepath: str, include_computed: bool = False) -> None:
-        """
-        Save all vulnerabilities to JSON file.
+        """Save all vulnerabilities to JSON file."""
+        from .io import CVDIO
 
-        Args:
-            filepath: Path to save .json file
-            include_computed: Include computed properties
-        """
-        import json
-
-        # Use to_json() for each vulnerability to handle type conversions
-        json_list = [json.loads(vuln.to_json(include_computed=include_computed)) for vuln in self]
-        with open(filepath, "w") as f:
-            json.dump(json_list, f, indent=2)
+        CVDIO.to_json_file(self, filepath, include_computed)
 
     @classmethod
     def from_json_batch(cls, filepath: str) -> "CVDArray":
-        """
-        Load multiple vulnerabilities from JSON file.
+        """Load multiple vulnerabilities from JSON file."""
+        from .io import CVDIO
 
-        Args:
-            filepath: Path to .json file
-
-        Returns:
-            CVDArray with loaded vulnerabilities
-        """
-        import json
-
-        with open(filepath) as f:
-            data_list = json.load(f)
-        vulns = [CVDVulnerability.from_dict(data) for data in data_list]
-        return cls(vulns)
+        return CVDIO.from_json_file(filepath)
 
     def import_nvd(
         self,
@@ -1849,27 +1532,8 @@ class CVDArray:
         infer_timestamps: bool = True,
         include_rejected: bool = False,
     ) -> None:
-        """
-        Import NVD vulnerability data.
-
-        Args:
-            source: Path to NVD JSON file or list of CVE items
-            apply_event: Apply event P (Public) from publishedDate (default: True)
-            import_metadata: Store full NVD record in metadata['nvd'] (default: False)
-            include: Only import these metadata fields
-            exclude: Skip these metadata fields
-            skip_existing: Skip CVEs already in array (default: False)
-            infer_vendor: Infer V event from publishedDate (default: True)
-            infer_timestamps: Use proxy timestamps for inferred events (default: True)
-            include_rejected: Include rejected CVEs in import (default: False)
-
-        Example:
-            >>> arr = CVDArray()
-            >>> with open("nvdcve-1.1-2024.json") as f:
-            ...     data = json.load(f)
-            >>> arr.import_nvd(data["CVE_Items"])
-        """
-        from vulnstate.io import CVDIO
+        """Import NVD vulnerability data."""
+        from .io import CVDIO
 
         CVDIO.import_nvd(
             self,
@@ -1893,200 +1557,25 @@ class CVDArray:
         exclude: Optional[list[str]] = None,
         skip_existing: bool = True,
     ) -> int:
-        """
-        Import NVD data from multiple files matching a glob pattern.
-
-        Args:
-            pattern: Glob pattern for NVD JSON files (e.g., 'nvdcve-*.json')
-            apply_event: Apply event P (Public) from publishedDate (default: True)
-            import_metadata: Store full NVD record in metadata['nvd'] (default: False)
-            include: Only import these metadata fields
-            exclude: Skip these metadata fields
-            skip_existing: Skip CVEs already in array (default: True)
-
-        Returns:
-            Number of files processed
-
-        Example:
-            >>> arr = CVDArray.zeros(0)
-            >>> count = arr.import_nvd_glob('nvdcve-2.0-*.json')
-            >>> print(f"Loaded from {count} files")
-        """
-        from vulnstate.io import CVDIO
+        """Import NVD data from multiple files matching a glob pattern."""
+        from .io import CVDIO
 
         return CVDIO.import_nvd_glob(
             self, pattern, apply_event, import_metadata, include, exclude, skip_existing
         )
 
-    def infer_events(
-        self,
-        vendor_lead: int = 0,
-        thirdparty_lag: int = 7,
-        deploy: bool = True,
-        deploy_lag: int = 30,
-        severity_adjusted: bool = False,
-        heuristics: bool = True,
-    ) -> dict[str, int]:
-        """
-        Compute event timestamps using configurable offsets and heuristics.
-
-        Tier 1 (always): Refines V timestamps from advisory tags using offsets,
-        infers V from Patch tag, applies D from F + lag.
-        Tier 2 (heuristics=True): CPE/CVSS-based F inference, age-based V.
-
-        All inferred events are flagged with inferred=True. Never overwrites
-        events that are not already flagged as inferred.
-
-        Args:
-            vendor_lead: Days V precedes P for Vendor Advisory tag (default 0)
-            thirdparty_lag: Days V follows P for Third Party Advisory tag (default 7)
-            deploy: Whether to infer D from F + lag (default True)
-            deploy_lag: Flat days between F and D (default 30)
-            severity_adjusted: Use severity-based D lag instead of flat (default False)
-            heuristics: Enable CPE/CVSS/age-based guesses (default True)
-
-        Returns:
-            Summary dict: {"V_inferred": N, "F_inferred": N, "D_inferred": N}
-        """
-        import contextlib
-
-        summary: dict[str, int] = {"V_inferred": 0, "F_inferred": 0, "D_inferred": 0}
-
-        if self._vulnerabilities is None or len(self._vulnerabilities) == 0:
-            return summary
-
-        # Severity-based deploy lag mapping
-        severity_lag_map = {
-            "CRITICAL": 7,
-            "HIGH": 14,
-            "MEDIUM": 30,
-            "LOW": 60,
-        }
-
-        for i in range(len(self)):
-            vuln = self.get(i)
-            metadata = vuln.metadata
-
-            # Get reference tags from stored metadata
-            ref_tags = set(metadata.get("ref_tags", []))
-
-            p_ts = vuln.events.get(CVDEvent.P)
-
-            # --- V inference ---
-            # Only infer if V not set OR was previously inferred (can refine)
-            if not vuln.has_event_occurred(CVDEvent.V) or (
-                CVDEvent.V in vuln.state.inferred_events
-            ):
-                v_ts: Optional[datetime] = None
-
-                if "Vendor Advisory" in ref_tags and p_ts is not None:
-                    v_ts = p_ts - timedelta(days=vendor_lead)
-                elif "Third Party Advisory" in ref_tags and p_ts is not None:
-                    v_ts = p_ts + timedelta(days=thirdparty_lag)
-                elif "Patch" in ref_tags and p_ts is not None:
-                    # Patch implies vendor awareness (at or before P)
-                    v_ts = p_ts - timedelta(days=vendor_lead)
-                elif heuristics and p_ts is not None and metadata.get("has_version_end_excluding"):
-                    # Heuristic: CPE boundary implies vendor awareness
-                    v_ts = p_ts
-
-                if v_ts is not None:
-                    if vuln.has_event_occurred(CVDEvent.V):
-                        # Update timestamp on already-inferred V
-                        vuln.events[CVDEvent.V] = v_ts
-                    else:
-                        vuln.apply_event(CVDEvent.V, timestamp=v_ts, inferred=True)
-                    summary["V_inferred"] += 1
-
-            # --- F inference ---
-            if not vuln.has_event_occurred(CVDEvent.F):
-                f_ts: Optional[datetime] = None
-
-                # Patch tag implies fix exists (use last_modified as proxy)
-                if "Patch" in ref_tags:
-                    last_mod_str = metadata.get("last_modified")
-                    if last_mod_str:
-                        with contextlib.suppress(ValueError, TypeError):
-                            f_ts = datetime.fromisoformat(last_mod_str.replace("Z", "+00:00"))
-
-                # CPE versionEndExcluding implies fix version exists (heuristic)
-                if f_ts is None and heuristics and metadata.get("has_version_end_excluding"):
-                    last_mod_str = metadata.get("last_modified")
-                    if last_mod_str:
-                        with contextlib.suppress(ValueError, TypeError):
-                            f_ts = datetime.fromisoformat(last_mod_str.replace("Z", "+00:00"))
-
-                if f_ts is not None:
-                    # F requires V first - ensure V is set
-                    if not vuln.has_event_occurred(CVDEvent.V) and p_ts is not None:
-                        vuln.apply_event(CVDEvent.V, timestamp=p_ts, inferred=True)
-
-                    with contextlib.suppress(ValueError):
-                        vuln.apply_event(CVDEvent.F, timestamp=f_ts, inferred=True)
-                        summary["F_inferred"] += 1
-
-            # --- D inference ---
-            if (
-                deploy
-                and vuln.has_event_occurred(CVDEvent.F)
-                and not vuln.has_event_occurred(CVDEvent.D)
-            ):
-                f_ts_val = vuln.events.get(CVDEvent.F)
-                if f_ts_val is not None and isinstance(f_ts_val, datetime):
-                    if severity_adjusted:
-                        # Use CVSS score to determine severity tier
-                        cvss = vuln.cvss_score
-                        if cvss is not None:
-                            if cvss >= 9.0:
-                                lag = severity_lag_map["CRITICAL"]
-                            elif cvss >= 7.0:
-                                lag = severity_lag_map["HIGH"]
-                            elif cvss >= 4.0:
-                                lag = severity_lag_map["MEDIUM"]
-                            else:
-                                lag = severity_lag_map["LOW"]
-                        else:
-                            lag = deploy_lag  # Fallback to flat lag
-                    else:
-                        lag = deploy_lag
-
-                    d_ts = f_ts_val + timedelta(days=lag)
-                    with contextlib.suppress(ValueError):
-                        vuln.apply_event(CVDEvent.D, timestamp=d_ts, inferred=True)
-                        summary["D_inferred"] += 1
-
-        # Sync array state
-        self.sync()
-        return summary
-
     def save_pickle_batch(self, filepath: str) -> None:
-        """
-        Save all vulnerabilities to pickle file (fast).
+        """Save all vulnerabilities to pickle file (fast)."""
+        from .io import CVDIO
 
-        Args:
-            filepath: Path to save .pkl file
-        """
-        import pickle
-
-        with open(filepath, "wb") as f:
-            pickle.dump(list(self), f, protocol=pickle.HIGHEST_PROTOCOL)
+        CVDIO.to_pickle_file(self, filepath)
 
     @classmethod
     def load_pickle_batch(cls, filepath: str) -> "CVDArray":
-        """
-        Load multiple vulnerabilities from pickle file.
+        """Load multiple vulnerabilities from pickle file."""
+        from .io import CVDIO
 
-        Args:
-            filepath: Path to .pkl file
-
-        Returns:
-            CVDArray with loaded vulnerabilities
-        """
-        import pickle
-
-        with open(filepath, "rb") as f:
-            vulns = pickle.load(f)
-        return cls(vulns)
+        return CVDIO.from_pickle_file(filepath)
 
     # ==================== DATA IMPORT ====================
 
@@ -2097,29 +1586,10 @@ class CVDArray:
         include: Optional[list[str]] = None,
         exclude: Optional[list[str]] = None,
     ) -> None:
-        """
-        Import EPSS (Exploit Prediction Scoring System) data.
-
-        Delegates to CVDIO for implementation.
-
-        Args:
-            source: Filepath to EPSS CSV or dict mapping CVE IDs to EPSS data
-            import_metadata: Store full EPSS data in vuln.metadata['epss'] (default False)
-            include: Only store these fields (if import_metadata=True)
-            exclude: Skip these fields (if import_metadata=True)
-
-        Example:
-            >>> epss_scores = {'CVE-2024-001': 0.85, 'CVE-2024-002': 0.42}
-            >>> arr.import_epss(epss_scores)
-            >>> # With metadata
-            >>> epss_data = {'CVE-2024-001': {'score': 0.85, 'percentile': 0.95}}
-            >>> arr.import_epss(epss_data, import_metadata=True)
-        """
+        """Import EPSS data. See CVDIO.import_epss for full docs."""
         from .io import CVDIO
 
-        CVDIO.import_epss(
-            self, source, import_metadata=import_metadata, include=include, exclude=exclude
-        )
+        CVDIO.import_epss(self, source, import_metadata, include, exclude)
 
     def import_kev(
         self,
@@ -2129,20 +1599,7 @@ class CVDArray:
         include: Optional[list[str]] = None,
         exclude: Optional[list[str]] = None,
     ) -> None:
-        """
-        Import KEV catalog data.
-
-        Args:
-            source: Filepath to KEV CSV or dict mapping CVE IDs to KEV data
-            apply_event: Apply event A with dateAdded timestamp (default True)
-            import_metadata: Store full KEV data in metadata['kev'] (default False)
-            include: Only store these fields (if import_metadata=True)
-            exclude: Skip these fields (if import_metadata=True)
-
-        Example:
-            >>> arr.import_kev("kev.csv")
-            >>> arr.import_kev("kev.csv", import_metadata=True)
-        """
+        """Import KEV catalog data. See CVDIO.import_kev for full docs."""
         from .io import CVDIO
 
         CVDIO.import_kev(self, source, apply_event, import_metadata, include, exclude)
@@ -2159,56 +1616,7 @@ class CVDArray:
         include: Optional[list[str]] = None,
         exclude: Optional[list[str]] = None,
     ) -> None:
-        """
-        Generic CSV import that applies any CVD event with timestamps.
-
-        This method enables importing vendor patch advisories (event F),
-        threat intel (event A), or any custom timeline data. It can match
-        CVEs and apply the specified event with a timestamp, optionally
-        storing the full row data in metadata.
-
-        Delegates to CVDIO for implementation.
-
-        Args:
-            source: Filepath to CSV or list of row dicts
-            cve_column: Column name containing CVE IDs
-            event: CVD event to apply (V, F, D, P, X, or A)
-            timestamp_column: Column name containing event timestamps
-            apply_event: Apply event with timestamp (default True)
-            metadata_namespace: Namespace for storing row metadata (default: None)
-            import_metadata: Store full row in vuln.metadata[namespace] (default False)
-            include: Only store these fields (if import_metadata=True)
-            exclude: Skip these fields (if import_metadata=True)
-
-        Example:
-            # Import vendor patch dates (event F)
-            >>> arr.import_csv(
-            ...     source='vendor_patches.csv',
-            ...     cve_column='cve_id',
-            ...     event=CVDEvent.F,
-            ...     timestamp_column='patch_date',
-            ...     apply_event=True
-            ... )
-
-            # Import threat intel with metadata
-            >>> arr.import_csv(
-            ...     source='threat_intel.csv',
-            ...     cve_column='cve',
-            ...     event=CVDEvent.A,
-            ...     timestamp_column='attack_date',
-            ...     apply_event=True,
-            ...     import_metadata=True,
-            ...     metadata_namespace='threat_intel'
-            ... )
-
-            # Import disclosure dates (event P)
-            >>> arr.import_csv(
-            ...     source='disclosures.csv',
-            ...     cve_column='vuln_id',
-            ...     event=CVDEvent.P,
-            ...     timestamp_column='disclosure_date'
-            ... )
-        """
+        """Generic CSV import. See CVDIO.import_csv for full docs."""
         from .io import CVDIO
 
         CVDIO.import_csv(
@@ -2237,62 +1645,7 @@ class CVDArray:
         include: Optional[list[str]] = None,
         exclude: Optional[list[str]] = None,
     ) -> None:
-        """
-        Generic JSON import that applies any CVD event with timestamps.
-
-        Supports nested field access using dot notation (e.g., "vulnerability.cve_id"
-        accesses {"vulnerability": {"cve_id": "CVE-2024-001"}}).
-
-        This method enables importing data from JSON files or lists of dicts
-        with complex nested structures. It can match CVEs using nested paths
-        and apply the specified event with a timestamp, optionally storing
-        the full record in metadata.
-
-        Delegates to CVDIO for implementation.
-
-        Args:
-            source: Filepath to JSON or list of dicts
-            cve_field: Field path to CVE IDs (supports dot notation for nested fields)
-            event: CVD event to apply (V, F, D, P, X, or A)
-            timestamp_field: Field path to event timestamps (supports dot notation)
-            apply_event: Apply event with timestamp (default True)
-            metadata_namespace: Namespace for storing row metadata (default: None)
-            import_metadata: Store full row in vuln.metadata[namespace] (default False)
-            include: Only store these fields (if import_metadata=True)
-            exclude: Skip these fields (if import_metadata=True)
-
-        Example:
-            # Import from nested JSON structure
-            >>> arr.import_json(
-            ...     source='threat_intel.json',
-            ...     cve_field='vulnerability.cve_id',
-            ...     event=CVDEvent.A,
-            ...     timestamp_field='threat_intel.first_observed',
-            ...     apply_event=True
-            ... )
-
-            # Import vendor patches with metadata
-            >>> arr.import_json(
-            ...     source='vendor_data.json',
-            ...     cve_field='cve.id',
-            ...     event=CVDEvent.F,
-            ...     timestamp_field='patch.release_date',
-            ...     apply_event=True,
-            ...     import_metadata=True,
-            ...     metadata_namespace='vendor'
-            ... )
-
-            # Import from list of dicts (API response)
-            >>> threat_data = [
-            ...     {"vuln": {"id": "CVE-2024-001"}, "observed": "2024-03-01"}
-            ... ]
-            >>> arr.import_json(
-            ...     source=threat_data,
-            ...     cve_field='vuln.id',
-            ...     event=CVDEvent.A,
-            ...     timestamp_field='observed'
-            ... )
-        """
+        """Generic JSON import. See CVDIO.import_json for full docs."""
         from .io import CVDIO
 
         CVDIO.import_json(
@@ -2308,129 +1661,63 @@ class CVDArray:
             exclude,
         )
 
+    def import_dict(
+        self,
+        data: list[dict[str, Any]],
+        on_error: str = "skip",
+    ) -> "CVDArray":
+        """Import vulnerabilities from list of dicts.
+
+        Enables dict roundtrip workflow:
+        >>> exported = arr.to_dict_batch()
+        >>> arr2 = CVDArray()
+        >>> arr2.import_dict(exported)
+
+        Args:
+            data: List of vulnerability dicts (from to_dict_batch or manual).
+                  Each dict should have at minimum 'cve_id' or 'vuln_id'.
+                  Optional fields: 'state', 'cvss_scores', 'epss_scores', etc.
+            on_error: Error handling mode:
+                - "skip": Skip invalid records silently (default)
+                - "raise": Raise exception on first invalid record
+                - "collect": Skip invalid records but collect errors (future)
+
+        Returns:
+            self (for chaining)
+
+        Example:
+            >>> arr = CVDArray()
+            >>> arr.import_dict([
+            ...     {"cve_id": "CVE-2024-001", "state": "VFdpxa"},
+            ...     {"cve_id": "CVE-2024-002", "state": "vfdPxa"},
+            ... ])
+            >>> len(arr)
+            2
+        """
+        from .io import CVDIO
+
+        CVDIO.import_dict(self, data, on_error)
+        return self
+
     # ==================== FACTORY METHODS ====================
+    # Implementations delegated to factories module; see factories.py for details
 
     @classmethod
     def zeros(cls, n: int, vuln_id_prefix: Optional[str] = None) -> "CVDArray":
-        """
-        Create fixed-size array of n vulnerabilities in initial state (vfdpxa).
-
-        All vulnerabilities start in the initial 'vfdpxa' state with no events applied.
-        Fixed-size arrays have strict capacity limits - attempting to import more items
-        than capacity raises ValueError. Use CVDArray() for dynamic growth.
-
-        Args:
-            n: Number of vulnerabilities to create (fixed capacity)
-            vuln_id_prefix: Optional prefix for auto-generated CVE IDs (e.g., 'ZERO')
-                If provided, creates IDs like ZERO-00000, ZERO-00001, etc.
-
-        Returns:
-            Fixed-size CVDArray with n vulnerabilities in vfdpxa state
-
-        Example:
-            >>> arr = CVDArray.zeros(100)  # 100 initial vulnerabilities
-            >>> arr.is_fixed_size
-            True
-            >>> len(arr)
-            100
-        """
-        vulns = []
-        for i in range(n):
-            cve_id = f"{vuln_id_prefix}-{i:05d}" if vuln_id_prefix else None
-            # Create with no awareness flags (defaults to initial state vfdpxa)
-            vuln = CVDVulnerability(cve_id=cve_id)
-            vulns.append(vuln)
-        return cls(vulns, fixed_size=True)
+        """Create fixed-size array of n vulnerabilities in initial state (vfdpxa)."""
+        return _factories.create_zeros(n, vuln_id_prefix)
 
     @classmethod
     def ones(cls, n: int, vuln_id_prefix: Optional[str] = None) -> "CVDArray":
-        """
-        Create fixed-size array of n vulnerabilities in terminal state (VFDPXA).
-
-        All vulnerabilities start with all events announced (VFDPXA state).
-        This is useful for testing and scenarios where all phases are complete.
-        Fixed-size arrays have strict capacity limits - attempting to import more items
-        than capacity raises ValueError. Use CVDArray() for dynamic growth.
-
-        Args:
-            n: Number of vulnerabilities to create (fixed capacity)
-            vuln_id_prefix: Optional prefix for auto-generated CVE IDs (e.g., 'TERM')
-                If provided, creates IDs like TERM-00000, TERM-00001, etc.
-
-        Returns:
-            Fixed-size CVDArray with n vulnerabilities in VFDPXA state
-
-        Example:
-            >>> arr = CVDArray.ones(100)  # 100 terminal state vulnerabilities
-            >>> arr.is_fixed_size
-            True
-        """
-        vulns = []
-        for i in range(n):
-            cve_id = f"{vuln_id_prefix}-{i:05d}" if vuln_id_prefix else None
-            # Create with all awareness flags to reach terminal state VFDPXA
-            vuln = CVDVulnerability(
-                cve_id=cve_id,
-                vendor_aware=True,
-                fix_aware=True,
-                deployed_aware=True,
-                public_aware=True,
-                exploit_aware=True,
-                attack_aware=True,
-                create_timestamps=False,
-            )
-            vulns.append(vuln)
-        return cls(vulns, fixed_size=True)
+        """Create fixed-size array of n vulnerabilities in terminal state (VFDPXA)."""
+        return _factories.create_ones(n, vuln_id_prefix)
 
     @classmethod
     def random(
         cls, n: int, vuln_id_prefix: Optional[str] = None, seed: Optional[int] = None
     ) -> "CVDArray":
-        """
-        Create fixed-size array of n vulnerabilities with random valid states.
-
-        Each vulnerability is assigned a random valid state from the 32 possible CVD states.
-        Useful for testing and simulations.
-        Fixed-size arrays have strict capacity limits - attempting to import more items
-        than capacity raises ValueError. Use CVDArray() for dynamic growth.
-
-        Args:
-            n: Number of vulnerabilities to create (fixed capacity)
-            vuln_id_prefix: Optional prefix for auto-generated CVE IDs (e.g., 'RAND')
-                If provided, creates IDs like RAND-00000, RAND-00001, etc.
-            seed: Optional random seed for reproducibility
-
-        Returns:
-            Fixed-size CVDArray with n vulnerabilities in random valid states
-
-        Example:
-            >>> arr = CVDArray.random(1000)  # 1000 random vulnerabilities
-            >>> arr.is_fixed_size
-            True
-        """
-        if seed is not None:
-            np.random.seed(seed)
-
-        valid_states = get_all_valid_states()
-        vulns = []
-        for i in range(n):
-            cve_id = f"{vuln_id_prefix}-{i:05d}" if vuln_id_prefix else None
-            # Select random valid state
-            random_state_str = np.random.choice(valid_states)
-            # Convert state string to awareness flags for constructor
-            state_int = string_to_state_int(random_state_str)
-            vuln = CVDVulnerability(
-                cve_id=cve_id,
-                vendor_aware=bool(state_int & (1 << CVDEvent.V)),
-                fix_aware=bool(state_int & (1 << CVDEvent.F)),
-                deployed_aware=bool(state_int & (1 << CVDEvent.D)),
-                public_aware=bool(state_int & (1 << CVDEvent.P)),
-                exploit_aware=bool(state_int & (1 << CVDEvent.X)),
-                attack_aware=bool(state_int & (1 << CVDEvent.A)),
-                create_timestamps=False,
-            )
-            vulns.append(vuln)
-        return cls(vulns, fixed_size=True)
+        """Create fixed-size array of n vulnerabilities with random valid states."""
+        return _factories.create_random(n, vuln_id_prefix, seed)
 
     @classmethod
     def generate(
@@ -2441,222 +1728,262 @@ class CVDArray:
         vendors: Optional[list[str]] = None,
         seed: Optional[int] = None,
     ) -> "CVDArray":
-        """
-        Generate a realistic sample dataset with configurable distributions.
-
-        Creates vulnerabilities with randomized events, CVSS scores, and vendor
-        assignments based on the provided probability distributions. Unlike random(),
-        this method produces realistic timelines with proper event ordering.
-
-        Args:
-            size: Number of vulnerabilities to generate
-            event_probs: Probability of each event occurring. Defaults:
-                V=1.0, F=0.7, D=0.4, P=0.5, X=0.2, A=0.1
-            cvss_range: Min/max CVSS base score range (default: 3.0-10.0)
-            vendors: List of vendor names to assign. Default:
-                ["VendorA", "VendorB", "VendorC", "VendorD", "VendorE"]
-            seed: Optional random seed for reproducibility
-
-        Returns:
-            CVDArray with generated vulnerabilities (not fixed-size)
-
-        Example:
-            >>> arr = CVDArray.generate(1000, seed=42)
-            >>> arr = CVDArray.generate(500, event_probs={CVDEvent.X: 0.5, CVDEvent.A: 0.3})
-        """
-        import random as rand_mod
-
-        if seed is not None:
-            np.random.seed(seed)
-            rand_mod.seed(seed)
-
-        default_probs: dict[CVDEvent, float] = {
-            CVDEvent.V: 1.0,
-            CVDEvent.F: 0.7,
-            CVDEvent.D: 0.4,
-            CVDEvent.P: 0.5,
-            CVDEvent.X: 0.2,
-            CVDEvent.A: 0.1,
-        }
-        if event_probs:
-            default_probs.update(event_probs)
-        probs = default_probs
-
-        if vendors is None:
-            vendors = ["VendorA", "VendorB", "VendorC", "VendorD", "VendorE"]
-
-        cvss_min, cvss_max = cvss_range
-
-        vulns: list[CVDVulnerability] = []
-        for i in range(size):
-            cve_id = f"CVE-2024-{i:05d}"
-            vendor = vendors[i % len(vendors)]
-            cvss = round(rand_mod.uniform(cvss_min, cvss_max), 1)
-
-            vuln = CVDVulnerability(
-                cve_id=cve_id,
-                vendor=vendor,
-                cvss_score=cvss,
-            )
-
-            # Base timestamp for this vulnerability
-            base = datetime(2024, 1, 1) + timedelta(days=i % 365)
-
-            # Apply events based on probabilities, respecting V→F→D constraint
-            if rand_mod.random() < probs[CVDEvent.V]:
-                vuln.apply_event(CVDEvent.V, timestamp=base)
-
-                if rand_mod.random() < probs[CVDEvent.F]:
-                    vuln.apply_event(
-                        CVDEvent.F,
-                        timestamp=base + timedelta(days=rand_mod.randint(5, 30)),
-                    )
-
-                    if rand_mod.random() < probs[CVDEvent.D]:
-                        vuln.apply_event(
-                            CVDEvent.D,
-                            timestamp=base + timedelta(days=rand_mod.randint(20, 60)),
-                        )
-
-            # P, X, A are independent of V→F→D
-            if rand_mod.random() < probs[CVDEvent.P]:
-                vuln.apply_event(
-                    CVDEvent.P,
-                    timestamp=base + timedelta(days=rand_mod.randint(1, 45)),
-                )
-
-            if rand_mod.random() < probs[CVDEvent.X]:
-                vuln.apply_event(
-                    CVDEvent.X,
-                    timestamp=base + timedelta(days=rand_mod.randint(0, 30)),
-                )
-
-            if rand_mod.random() < probs[CVDEvent.A]:
-                vuln.apply_event(
-                    CVDEvent.A,
-                    timestamp=base + timedelta(days=rand_mod.randint(5, 45)),
-                )
-
-            vulns.append(vuln)
-
-        return cls(vulns)
+        """Generate a realistic sample dataset with configurable distributions."""
+        return _factories.generate(size, event_probs, cvss_range, vendors, seed)
 
     # ==================== SCORING PROPERTIES ====================
 
-    def _ensure_cvss_metrics_parsed(self) -> None:
-        """Lazy parse all CVSS vectors on first metric access (batch).
-
-        Parses all vectors at once to populate all 8 CVSS metric arrays.
-        This avoids parsing during import, deferring the cost to first access.
-        """
-        if self._cvss_metrics_parsed:
-            return
-
-        from .parsers import NVDParser
-
-        # Get raw vectors from scoring dataclass
-        vectors: np.ndarray = (
-            self.scoring.cve_vector
-            if hasattr(self.scoring, "cve_vector")
-            else np.array([], dtype=object)
-        )
-
-        if len(vectors) == 0:
-            # Empty array, nothing to parse
-            self._cvss_metrics_parsed = True
-            return
-
-        # Parse all vectors at once
-        metrics = [NVDParser.parse_cvss_vector(v) for v in vectors]
-
-        # Populate ALL scoring arrays
-        self.scoring.attack_vector = np.array([m["AV"] for m in metrics], dtype=object)
-        self.scoring.attack_complexity = np.array([m["AC"] for m in metrics], dtype=object)
-        self.scoring.privileges_required = np.array([m["PR"] for m in metrics], dtype=object)
-        self.scoring.user_interaction = np.array([m["UI"] for m in metrics], dtype=object)
-        self.scoring.scope = np.array([m["S"] for m in metrics], dtype=object)
-        self.scoring.confidentiality_impact = np.array([m["C"] for m in metrics], dtype=object)
-        self.scoring.integrity_impact = np.array([m["I"] for m in metrics], dtype=object)
-        self.scoring.availability_impact = np.array([m["A"] for m in metrics], dtype=object)
-
-        self._cvss_metrics_parsed = True
-
     @property
     def cvss_scores(self) -> np.ndarray:
-        """CVSS base scores (float32, 0.0-10.0)."""
-        return self.scoring.cvss_score
+        """CVSS base scores (float32, 0.0-10.0).
+
+        Raises:
+            TransformNotRunError: If transform() has not been called.
+        """
+        self._require_transform("cvss_scores")
+        return self.scores["cvss_score"]
+
+    @property
+    def cvss_score(self) -> np.ndarray:
+        """Best CVSS base score (float32, 0.0-10.0, prefer 3.1 > 4.0 > 3.0 > 2.0).
+
+        Raises:
+            TransformNotRunError: If transform() has not been called.
+        """
+        self._require_transform("cvss_score")
+        return self.scores["cvss_score"]
+
+    @property
+    def cvss_max(self) -> np.ndarray:
+        """Maximum CVSS score across all versions (float32, 0.0-10.0).
+
+        Raises:
+            TransformNotRunError: If transform() has not been called.
+        """
+        self._require_transform("cvss_max")
+        return self.scores["cvss_max"]
+
+    @property
+    def has_exploit(self) -> np.ndarray:
+        """Has known exploits (bool array).
+
+        Raises:
+            TransformNotRunError: If transform() has not been called.
+        """
+        self._require_transform("has_exploit")
+        return self.scores["has_exploit"]
 
     @property
     def cve_vectors(self) -> np.ndarray:
         """CVSS vector strings (object array, e.g. 'CVSS:3.1/AV:N/AC:L/...')."""
-        return self._metadata_raw.get("cve_vector", np.array([], dtype=object))
+        if "cve_vector" in self._cache:
+            return self._cache["cve_vector"]
+        n = len(self)
+        vectors: np.ndarray = np.empty(n, dtype=object)
+        for i in range(n):
+            cvss_list: list[CVSSScore] = self._source.cvss_scores[i]  # type: ignore[assignment]
+            vectors[i] = cvss_list[0].vector if cvss_list else None
+        self._cache["cve_vector"] = vectors
+        return vectors
 
     @property
     def attack_vector(self) -> np.ndarray:
-        """CVSS AV metric (object: N/A/L/P, None if unparsed)."""
-        self._ensure_cvss_metrics_parsed()
-        return self.scoring.attack_vector
+        """CVSS Attack Vector values."""
+        return (
+            self._cvss_metrics.attack_vector if self._cvss_metrics else np.array([], dtype=object)
+        )
 
     @property
     def attack_complexity(self) -> np.ndarray:
-        """CVSS AC metric (object: L/H, None if unparsed)."""
-        self._ensure_cvss_metrics_parsed()
-        return self.scoring.attack_complexity
+        """CVSS Attack Complexity values."""
+        return (
+            self._cvss_metrics.attack_complexity
+            if self._cvss_metrics
+            else np.array([], dtype=object)
+        )
 
     @property
     def privileges_required(self) -> np.ndarray:
-        """CVSS PR metric (object: N/L/H, None if unparsed)."""
-        self._ensure_cvss_metrics_parsed()
-        return self.scoring.privileges_required
+        """CVSS Privileges Required values."""
+        return (
+            self._cvss_metrics.privileges_required
+            if self._cvss_metrics
+            else np.array([], dtype=object)
+        )
 
     @property
     def user_interaction(self) -> np.ndarray:
-        """CVSS UI metric (object: N/R, None if unparsed)."""
-        self._ensure_cvss_metrics_parsed()
-        return self.scoring.user_interaction
+        """CVSS User Interaction values."""
+        return (
+            self._cvss_metrics.user_interaction
+            if self._cvss_metrics
+            else np.array([], dtype=object)
+        )
 
     @property
     def scope(self) -> np.ndarray:
-        """CVSS S metric (object: U/C, None if unparsed)."""
-        self._ensure_cvss_metrics_parsed()
-        return self.scoring.scope
+        """CVSS Scope values."""
+        return self._cvss_metrics.scope if self._cvss_metrics else np.array([], dtype=object)
 
     @property
     def confidentiality_impact(self) -> np.ndarray:
-        """CVSS C metric (object: N/L/H, None if unparsed)."""
-        self._ensure_cvss_metrics_parsed()
-        return self.scoring.confidentiality_impact
+        """CVSS Confidentiality Impact values."""
+        return (
+            self._cvss_metrics.confidentiality_impact
+            if self._cvss_metrics
+            else np.array([], dtype=object)
+        )
 
     @property
     def integrity_impact(self) -> np.ndarray:
-        """CVSS I metric (object: N/L/H, None if unparsed)."""
-        self._ensure_cvss_metrics_parsed()
-        return self.scoring.integrity_impact
+        """CVSS Integrity Impact values."""
+        return (
+            self._cvss_metrics.integrity_impact
+            if self._cvss_metrics
+            else np.array([], dtype=object)
+        )
 
     @property
     def availability_impact(self) -> np.ndarray:
-        """CVSS A metric (object: N/L/H, None if unparsed)."""
-        self._ensure_cvss_metrics_parsed()
-        return self.scoring.availability_impact
+        """CVSS Availability Impact values."""
+        return (
+            self._cvss_metrics.availability_impact
+            if self._cvss_metrics
+            else np.array([], dtype=object)
+        )
 
     # ==================== ENRICHMENT PROPERTIES ====================
 
     @property
     def epss(self) -> np.ndarray:
-        """EPSS exploitation probability (float32, 0.0-1.0)."""
-        return self.enrichment.epss
+        """EPSS exploitation probability (float32, 0.0-1.0).
+
+        Raises:
+            TransformNotRunError: If transform() has not been called.
+        """
+        self._require_transform("epss")
+        return self.scores["epss_probability"]
 
     @property
     def kev(self) -> np.ndarray:
-        """CISA KEV catalog membership (bool array)."""
-        return self.enrichment.kev
+        """CISA KEV catalog membership (bool array).
+
+        Raises:
+            TransformNotRunError: If transform() has not been called.
+        """
+        self._require_transform("kev")
+        return self.scores["kev"]
 
     @property
     def epss_percentile(self) -> np.ndarray:
-        """EPSS percentile rank (float32, 0.0-1.0)."""
-        return self.enrichment.epss_percentile
+        """EPSS percentile rank (float32, 0.0-1.0).
+
+        Raises:
+            TransformNotRunError: If transform() has not been called.
+        """
+        self._require_transform("epss_percentile")
+        return self.scores["epss_percentile"]
 
     @property
     def kev_dates(self) -> np.ndarray:
         """KEV catalog date added (datetime64[s])."""
-        return self.enrichment.kev_date
+        if "kev_date" in self._cache:
+            return self._cache["kev_date"]
+        n = len(self)
+        dates: np.ndarray = np.empty(n, dtype="datetime64[s]")
+        dates[:] = np.datetime64("NaT")
+        for i in range(n):
+            kev_entry: Optional[KEVEntry] = self._source.kev[i]  # type: ignore[assignment]
+            if kev_entry is not None:
+                dates[i] = np.datetime64(kev_entry.added_at, "s")
+        self._cache["kev_date"] = dates
+        return dates
+
+    # ==================== DATA SCIENCE UX METHODS ====================
+
+    def head(self, n: int = 5) -> "CVDArray":
+        """Return first n items as CVDArray.
+
+        Pandas-like convenience method for quick exploration.
+
+        Args:
+            n: Number of items (default 5)
+
+        Returns:
+            CVDArray with first n items (or all items if array is smaller)
+
+        Example:
+            >>> arr = CVDArray.generate(1000)
+            >>> arr.head()  # First 5
+            >>> arr.head(10)  # First 10
+        """
+        result = self[:n]
+        # slice always returns CVDArray, cast for type checker
+        return result  # type: ignore[return-value]
+
+    def describe(self) -> dict[str, Any]:
+        """Return summary statistics.
+
+        Pandas-like method for quick data exploration. Returns basic
+        statistics without requiring transform(), and richer statistics
+        after transform() has been called.
+
+        Returns:
+            Dict with count, event rates, and (if transformed) score statistics
+
+        Example:
+            >>> arr = CVDArray.generate(100)
+            >>> arr.describe()  # Basic stats
+            >>> arr.transform().describe()  # Richer stats
+        """
+        result: dict[str, Any] = {
+            "count": len(self),
+            "events": self.event_occurrence_rates,
+        }
+
+        if self._is_transformed:
+            cvss = self.scores["cvss_score"]
+            valid_cvss = cvss[~np.isnan(cvss)]
+            if len(valid_cvss) > 0:
+                result["cvss_mean"] = float(np.mean(valid_cvss))
+                result["cvss_std"] = float(np.std(valid_cvss))
+                result["cvss_min"] = float(np.min(valid_cvss))
+                result["cvss_max"] = float(np.max(valid_cvss))
+
+            epss = self.scores["epss_probability"]
+            valid_epss = epss[~np.isnan(epss)]
+            if len(valid_epss) > 0:
+                result["epss_mean"] = float(np.mean(valid_epss))
+
+            result["kev_count"] = int(self.scores["kev"].sum())
+            result["zero_day_count"] = int(self.is_zero_day.sum())
+
+        return result
+
+    def info(self) -> str:
+        """Return shape, dtypes, memory usage info.
+
+        Pandas-like method for inspecting array structure.
+
+        Returns:
+            Formatted string with array information
+
+        Example:
+            >>> arr = CVDArray.generate(1000)
+            >>> print(arr.info())
+        """
+        lines = [
+            f"CVDArray: {len(self)} vulnerabilities",
+            f"Fixed size: {self._fixed_size}",
+            f"Transformed: {self._is_transformed}",
+            f"Stale: {self._stale}",
+        ]
+
+        # Memory estimate (~2KB per vuln as per design doc)
+        mem_kb = len(self) * 2
+        if mem_kb > 1024:
+            lines.append(f"Memory: ~{mem_kb // 1024} MB")
+        else:
+            lines.append(f"Memory: ~{mem_kb} KB")
+
+        return "\n".join(lines)

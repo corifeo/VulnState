@@ -396,3 +396,38 @@ class CVDFormatter:
             console = Console()
 
         console.print(CVDFormatter.format_state_legend())
+
+    @staticmethod
+    def array_summary_text(arr: "CVDArray") -> str:
+        """Plain text summary of CVDArray statistics.
+
+        Args:
+            arr: CVDArray to summarize
+
+        Returns:
+            Multi-line string with statistics
+        """
+        n = len(arr)
+        if n == 0:
+            return "Empty CVDArray (0 vulnerabilities)"
+
+        lines = ["CVDArray Summary", "=" * 50, f"Total Vulnerabilities: {n}", ""]
+
+        # State distribution
+        state_counts = arr.count_by_state()
+        lines.append("State Distribution:")
+        for state, count in sorted(state_counts.items()):
+            pct = count / n * 100
+            lines.append(f"  {state}: {count} ({pct:.1f}%)")
+        lines.append("")
+
+        # Event occurrence rates
+        lines.append("Event Occurrence Rates:")
+        for event_name, pct in arr.event_occurrence_rates.items():
+            lines.append(f"  {event_name}: {pct:.1f}%")
+
+        # Terminal states
+        terminal_count = int(arr.terminal_mask.sum())
+        lines.append(f"\nComplete (VFDPXA): {terminal_count}/{n} ({terminal_count / n * 100:.1f}%)")
+
+        return "\n".join(lines)

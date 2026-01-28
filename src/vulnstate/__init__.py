@@ -9,11 +9,10 @@ Core Classes:
     CVDEvent: IntEnum of 6 CVD events (V, F, D, P, X, A)
 
 Analytics:
-    CVDAnalyzer: Compute fix_path, threat_state, validity, desiderata
+    DesiderataExtractor: Compute fix_path, threat_state, validity, desiderata
     AnalysisResult: All computed analytics from analyze()
 
 I/O:
-    CVDIO: Dict, JSON, file import/export
     CVDFormatter: Rich console formatting
 
 Enums:
@@ -33,20 +32,42 @@ Advanced Usage:
     >>> from vulnstate.constants import string_to_state_int
 """
 
-from .analyzer import CVDAnalyzer
 from .array import CVDArray
 from .constants import (
     DESIDERATA_PAIRS,
     VALID_HISTORIES,
     AntiDesiderataBit,
+    ArrayFullError,
     CVDEvent,
     DesiderataBit,
     FixPath,
     HistoryValidity,
     ThreatState,
+    TransformNotRunError,
 )
 from .formatting import CVDFormatter
-from .models import AnalysisResult
+from .lifecycle import (
+    LifecycleNamespace,
+    ScalarLifecycle,
+    VectorLifecycle,
+)
+from .models import (
+    AnalysisResult,
+    AnalyticsResult,
+    ArraySource,
+    CVSSScore,
+    CWEEntry,
+    EPSSScore,
+    ExploitReference,
+    KEVEntry,
+    ScoreResult,
+)
+from .transforms import (
+    CVDStateAnalyzer,
+    DesiderataExtractor,
+    ScoreExtractor,
+    Transform,
+)
 from .vulnerability import TIMESTAMP_UNKNOWN, CVDVulnerability
 
 __version__ = "0.2.0"
@@ -56,8 +77,11 @@ __all__ = [
     "CVDVulnerability",
     "CVDArray",
     "CVDEvent",
+    "ScalarLifecycle",
+    "VectorLifecycle",
+    "LifecycleNamespace",
     # Analytics
-    "CVDAnalyzer",
+    "DesiderataExtractor",
     "AnalysisResult",
     # I/O
     "CVDFormatter",
@@ -71,6 +95,22 @@ __all__ = [
     "DESIDERATA_PAIRS",
     "VALID_HISTORIES",
     "TIMESTAMP_UNKNOWN",
+    # Exceptions
+    "TransformNotRunError",
+    "ArrayFullError",
+    # Model classes
+    "CVSSScore",
+    "EPSSScore",
+    "CWEEntry",
+    "KEVEntry",
+    "ExploitReference",
+    "ScoreResult",
+    "AnalyticsResult",
+    "ArraySource",
+    # Transform classes
+    "Transform",
+    "ScoreExtractor",
+    "CVDStateAnalyzer",
     # Version
     "__version__",
 ]

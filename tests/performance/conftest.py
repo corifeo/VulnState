@@ -21,7 +21,9 @@ def pytest_collection_modifyitems(config, items):
     # Now clean up markers for tests in this folder
     for item in items:
         # Only process items in this folder
-        if "tests/performance" not in str(item.fspath) and "tests\\performance" not in str(item.fspath):
+        if "tests/performance" not in str(item.fspath) and "tests\\performance" not in str(
+            item.fspath
+        ):
             continue
 
         # Check if the test class has explicit slow marker

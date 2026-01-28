@@ -115,6 +115,4 @@ def terminal_vuln():
 @pytest.fixture
 def sample_array():
     """Small array (5 items) for unit tests."""
-    return CVDArray([
-        CVDVulnerability(f"CVE-2024-{i:03d}") for i in range(5)
-    ])
+    return CVDArray([CVDVulnerability(f"CVE-2024-{i:03d}") for i in range(5)])

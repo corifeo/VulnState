@@ -78,8 +78,7 @@ class TestSerializationPerformance:
     def test_json_roundtrip_1k(self, tmp_path):
         """JSON roundtrip with 1,000 vulnerabilities."""
         vulns = [
-            CVDVulnerability(f"CVE-2024-{i:05d}", cvss_score=float(i % 10))
-            for i in range(1000)
+            CVDVulnerability(f"CVE-2024-{i:05d}", cvss_score=float(i % 10)) for i in range(1000)
         ]
         for v in vulns[:500]:
             v.apply_event(CVDEvent.V)
@@ -97,6 +96,7 @@ class TestSerializationPerformance:
         """DataFrame export with 10,000 vulnerabilities."""
         vulns = [CVDVulnerability(f"CVE-2024-{i:05d}") for i in range(10000)]
         arr = CVDArray(vulns)
+        arr.transform()
 
         df = arr.to_dataframe()
 
@@ -167,8 +167,7 @@ class TestLargeScaleSerialization:
     def test_json_roundtrip_100k(self, tmp_path):
         """JSON roundtrip with 100,000 vulnerabilities."""
         vulns = [
-            CVDVulnerability(f"CVE-2024-{i:06d}", cvss_score=float(i % 10))
-            for i in range(100_000)
+            CVDVulnerability(f"CVE-2024-{i:06d}", cvss_score=float(i % 10)) for i in range(100_000)
         ]
         for v in vulns[:50_000]:
             v.apply_event(CVDEvent.V)

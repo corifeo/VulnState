@@ -112,6 +112,7 @@ class TestArrayIO:
         )
         arr[0].apply_event(CVDEvent.V)
         arr[1].apply_event(CVDEvent.V)
+        arr.transform()
 
         df = arr.to_dataframe()
 
@@ -126,6 +127,7 @@ class TestArrayIO:
         """Convert array to DataFrame with computed properties."""
         arr = CVDArray([CVDVulnerability("CVE-2024-001")])
         arr[0].apply_event(CVDEvent.V)
+        arr.transform()
 
         df_basic = arr.to_dataframe(include_analytics=False)
         df_computed = arr.to_dataframe(include_analytics=True)
@@ -1184,6 +1186,7 @@ def test_to_dataframe_basic():
     arr.get(0).apply_event(CVDEvent.V, np.datetime64("2024-01-01"))
     arr.get(1).identity.cve_id = "CVE-2024-0002"
     arr.sync()
+    arr.transform()
 
     df = arr.to_dataframe(include_analytics=False, explode_cvss=False, explode_metadata=False)
 
@@ -1215,6 +1218,7 @@ class TestDataFrameIntegration:
         v2.apply_event(CVDEvent.P, timestamp=base + timedelta(days=30))
 
         arr = CVDArray([v1, v2])
+        arr.transform()
         df = arr.to_dataframe(include_analytics=True)
 
         # Verify all 10 new analytical properties are present
@@ -1255,6 +1259,7 @@ class TestDataFrameIntegration:
         v.apply_event(CVDEvent.X, timestamp=base + timedelta(days=20))
 
         arr = CVDArray([v])
+        arr.transform()
         df = arr.to_dataframe(include_analytics=True)
 
         # Original analytical properties (before Phase 5)
@@ -1275,6 +1280,7 @@ class TestDataFrameIntegration:
     def test_to_dataframe_column_count_with_analytics(self):
         """Verify DataFrame has expected number of columns with analytics enabled."""
         arr = CVDArray.random(5, seed=42)
+        arr.transform()
         df = arr.to_dataframe(include_analytics=True, explode_cvss=False, explode_metadata=False)
 
         # Expected columns:
@@ -1302,6 +1308,7 @@ class TestDataFrameIntegration:
     def test_to_dataframe_analytics_false_excludes_analytical_properties(self):
         """Verify include_analytics=False excludes all analytical properties."""
         arr = CVDArray.random(5, seed=42)
+        arr.transform()
         df = arr.to_dataframe(include_analytics=False, explode_cvss=False, explode_metadata=False)
 
         # Should NOT have analytical properties
@@ -1324,6 +1331,7 @@ class TestDataFrameIntegration:
     def test_to_dataframe_with_empty_array(self):
         """Verify DataFrame export works with empty array."""
         arr = CVDArray([])
+        arr.transform()
         df = arr.to_dataframe(include_analytics=True)
 
         assert len(df) == 0, "Empty array should produce empty DataFrame"
@@ -1346,6 +1354,7 @@ class TestDataFrameIntegration:
 
         arr = CVDArray([v])
         arr.sync()
+        arr.transform()
 
         # Export to DataFrame
         df = arr.to_dataframe(include_analytics=True)
@@ -1377,6 +1386,7 @@ class TestDataFrameIntegration:
         # Now import enrichment data (this updates arr.enrichment, not metadata)
         CVDIO.import_epss(arr, {"CVE-2024-001": 0.85, "CVE-2024-002": 0.15})
         CVDIO.import_kev(arr, {"CVE-2024-001": {"dateAdded": "2021-11-03"}}, apply_event=False)
+        arr.transform()
 
         # Export with explode_metadata=True - this should NOT overwrite enrichment
         df = arr.to_dataframe(include_analytics=False, explode_metadata=True)
@@ -1412,6 +1422,8 @@ class TestSerializationRoundTrip:
         # Verify analytical properties are correctly recomputed
         arr1 = CVDArray([v1])
         arr2 = CVDArray([v2])
+        arr1.transform()
+        arr2.transform()
 
         assert arr1.is_zero_day_exploit[0] == arr2.is_zero_day_exploit[0]
         assert arr1.has_fix_before_exploit[0] == arr2.has_fix_before_exploit[0]
@@ -1434,6 +1446,8 @@ class TestSerializationRoundTrip:
         # Verify analytical properties match
         arr1 = CVDArray([v1])
         arr2 = CVDArray([v2])
+        arr1.transform()
+        arr2.transform()
 
         assert arr1.is_coordinated[0] == arr2.is_coordinated[0]
         assert arr1.is_responsible_disclosure[0] == arr2.is_responsible_disclosure[0]
@@ -1455,10 +1469,12 @@ class TestSerializationRoundTrip:
         v2.apply_event(CVDEvent.X, timestamp=base + timedelta(days=20))
 
         arr1 = CVDArray([v1, v2])
+        arr1.transform()
 
         # Serialize and deserialize
         dicts = CVDIO.array_to_dicts(arr1)
         arr2 = CVDIO.array_from_dicts(dicts)
+        arr2.transform()
 
         # Verify analytical properties match
         assert np.array_equal(arr1.is_zero_day_exploit, arr2.is_zero_day_exploit)
@@ -1471,44 +1487,47 @@ class TestCPEParser:
     """Tests for CPE parsing functionality."""
 
     def test_parse_cpe_extracts_vendor_and_product(self):
-        """CPE parser extracts vendor_id and product_id."""
-        from vulnstate.parsers import parse_cpe
+        """CPE parser extracts vendor and product."""
+        from vulnstate.transforms import parse_cpe
 
         result = parse_cpe("cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*")
-        assert result["vendor_id"] == "apache"
-        assert result["product_id"] == "log4j"
+        assert result["vendor"] == "apache"
+        assert result["product"] == "log4j"
+        assert result["type"] == "a"
+        assert result["version"] == "2.14.1"
 
     def test_parse_cpe_handles_os_type(self):
         """CPE parser handles OS-type CPE strings."""
-        from vulnstate.parsers import parse_cpe
+        from vulnstate.transforms import parse_cpe
 
         result = parse_cpe("cpe:2.3:o:microsoft:windows_10:*:*:*:*:*:*:*:*")
-        assert result["vendor_id"] == "microsoft"
-        assert result["product_id"] == "windows_10"
+        assert result["vendor"] == "microsoft"
+        assert result["product"] == "windows_10"
+        assert result["type"] == "o"
 
     def test_parse_cpe_handles_none(self):
-        """CPE parser returns None values for None input."""
-        from vulnstate.parsers import parse_cpe
+        """CPE parser returns empty strings for None input."""
+        from vulnstate.transforms import parse_cpe
 
         result = parse_cpe(None)
-        assert result["vendor_id"] is None
-        assert result["product_id"] is None
+        assert result["vendor"] == ""
+        assert result["product"] == ""
 
     def test_parse_cpe_handles_invalid_format(self):
-        """CPE parser returns None values for invalid format."""
-        from vulnstate.parsers import parse_cpe
+        """CPE parser returns empty strings for invalid format."""
+        from vulnstate.transforms import parse_cpe
 
         result = parse_cpe("not-a-cpe-string")
-        assert result["vendor_id"] is None
-        assert result["product_id"] is None
+        assert result["vendor"] == ""
+        assert result["product"] == ""
 
     def test_parse_cpe_handles_wildcard_vendor(self):
-        """CPE parser treats wildcards as None."""
-        from vulnstate.parsers import parse_cpe
+        """CPE parser treats wildcards as empty strings."""
+        from vulnstate.transforms import parse_cpe
 
         result = parse_cpe("cpe:2.3:a:*:someproduct:1.0:*:*:*:*:*:*:*")
-        assert result["vendor_id"] is None
-        assert result["product_id"] == "someproduct"
+        assert result["vendor"] == ""
+        assert result["product"] == "someproduct"
 
 
 class TestNVDMetadataExtraction:

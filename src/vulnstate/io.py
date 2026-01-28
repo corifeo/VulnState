@@ -139,9 +139,8 @@ class CVDIO:
                 vuln = arr.get(i)
                 kev_row = kev_data[cve_id]
 
-                # Set kev flag
+                # Set kev flag via kev_entry (read-only kev property)
                 arr._metadata_raw["kev"][i] = True
-                vuln.kev = True
 
                 # Extract parsed KEV fields with kev_ prefix
                 if "vendorProject" in kev_row:
@@ -158,11 +157,25 @@ class CVDIO:
                     vuln.metadata["kev_due_date"] = kev_row["dueDate"]
                 if "notes" in kev_row:
                     vuln.metadata["kev_notes"] = kev_row["notes"]
+
+                # Create KEVEntry for this vulnerability
+                from .models import KEVEntry
+
+                kev_added_at = datetime.now()
                 if "dateAdded" in kev_row:
                     vuln.metadata["kev_date_added"] = kev_row["dateAdded"]
-                    # Store in enrichment as datetime
+                    # Store as datetime
                     with contextlib.suppress(ValueError, TypeError):
-                        vuln.enrichment.kev_date = datetime.fromisoformat(kev_row["dateAdded"])
+                        kev_added_at = datetime.fromisoformat(kev_row["dateAdded"])
+
+                # Set kev_entry (this makes vuln.kev return True)
+                vuln.kev_entry = KEVEntry(
+                    added_at=kev_added_at,
+                    due_date=kev_row.get("dueDate"),
+                    required_action=kev_row.get("requiredAction"),
+                    ransomware_use=kev_row.get("knownRansomwareCampaignUse"),
+                    notes=kev_row.get("notes"),
+                )
 
                 # Apply event A
                 if apply_event and "dateAdded" in kev_row:
@@ -238,6 +251,23 @@ class CVDIO:
                 vuln = arr.get(i)
                 epss_value = epss_data[cve_id]
 
+                # Helper to set EPSS via list-based approach
+                from .models import EPSSScore
+
+                def set_epss_score(v: "CVDVulnerability", prob: float, pct: float = 0.0) -> None:
+                    if v.epss_scores:
+                        old = v.epss_scores[0]
+                        v.epss_scores[0] = EPSSScore(
+                            model=old.model,
+                            probability=prob,
+                            percentile=pct if pct else old.percentile,
+                            computed_at=old.computed_at,
+                        )
+                    else:
+                        v.epss_scores.append(
+                            EPSSScore(model=4, probability=prob, percentile=pct, computed_at=None)
+                        )
+
                 if import_metadata:
                     # Store full metadata
                     metadata_dict = (
@@ -255,14 +285,19 @@ class CVDIO:
                     vuln.metadata["epss"].update(metadata_dict)
 
                     # Also set epss score attribute for backward compatibility (handle both "epss" and "score" keys)
+                    epss_prob = None
+                    epss_pct = 0.0
                     if "epss" in metadata_dict:
-                        vuln.epss = float(metadata_dict["epss"])
+                        epss_prob = float(metadata_dict["epss"])
                     elif "score" in metadata_dict:
-                        vuln.epss = float(metadata_dict["score"])
+                        epss_prob = float(metadata_dict["score"])
 
                     # Extract percentile to enrichment
                     if "percentile" in metadata_dict:
-                        vuln.enrichment.epss_percentile = float(metadata_dict["percentile"])
+                        epss_pct = float(metadata_dict["percentile"])
+
+                    if epss_prob is not None:
+                        set_epss_score(vuln, epss_prob, epss_pct)
                 else:
                     # Just set score (handle both "epss" and "score" keys for backward compatibility)
                     if isinstance(epss_value, float):
@@ -272,11 +307,13 @@ class CVDIO:
                         score = float(epss_value.get("score", epss_value.get("epss", 0)))
                     else:
                         score = float(epss_value)
-                    vuln.epss = score
 
                     # Also extract percentile if it's a dict
+                    pct = 0.0
                     if isinstance(epss_value, dict) and "percentile" in epss_value:
-                        vuln.enrichment.epss_percentile = float(epss_value["percentile"])
+                        pct = float(epss_value["percentile"])
+
+                    set_epss_score(vuln, score, pct)
 
                 modified_indices.add(i)
 
@@ -572,24 +609,38 @@ class CVDIO:
 
         # Add analytics if requested (vectorized)
         if include_analytics:
-            data["is_fix_available"] = arr.is_fix_available
-            data["is_fix_deployed"] = arr.is_fix_deployed
-            data["is_weaponized"] = arr.is_weaponized
-            data["is_under_attack"] = arr.is_under_attack
-            data["is_premature_disclosure"] = arr.is_premature_disclosure
-            data["disclosure_window_days"] = arr.disclosure_window_days
-            data["fix_lag_days"] = arr.fix_lag_days
-            data["deployment_lag_days"] = arr.deployment_lag_days
+            # Zero-day indicators
+            data["is_zero_day"] = arr.is_zero_day
             data["is_zero_day_exploit"] = arr.is_zero_day_exploit
             data["is_zero_day_attack"] = arr.is_zero_day_attack
+
+            # Coordination quality
             data["is_coordinated"] = arr.is_coordinated
+            data["is_premature_disclosure"] = arr.is_premature_disclosure
             data["is_responsible_disclosure"] = arr.is_responsible_disclosure
+
+            # Fix effectiveness
+            data["is_fix_available"] = arr.is_fix_available
+            data["is_fix_deployed"] = arr.is_fix_deployed
             data["has_fix_before_exploit"] = arr.has_fix_before_exploit
             data["has_fix_before_attack"] = arr.has_fix_before_attack
             data["has_deployment_before_exploit"] = arr.has_deployment_before_exploit
             data["has_deployment_before_attack"] = arr.has_deployment_before_attack
+
+            # Threat characteristics
+            data["is_weaponized"] = arr.is_weaponized
+            data["is_under_attack"] = arr.is_under_attack
             data["is_private_attack"] = arr.is_private_attack
             data["is_mass_exploitation"] = arr.is_mass_exploitation
+
+            # Time deltas
+            data["disclosure_window_days"] = arr.disclosure_window_days
+            data["fix_lag_days"] = arr.fix_lag_days
+            data["deployment_lag_days"] = arr.deployment_lag_days
+
+            # Scores and validity
+            data["desiderata_score"] = arr.desiderata_score
+            data["validity"] = arr.analysis.validity_int
 
         # Add event timestamps (vectorized)
         data["V_timestamp"] = arr.V_timestamps
@@ -725,6 +776,20 @@ class CVDIO:
         # Inferred events
         data["inferred_events"] = [e.name for e in vuln.state.inferred_events]
 
+        # New API v2 enrichment fields
+        if vuln.cvss_scores:
+            data["cvss_scores"] = [s.to_dict() for s in vuln.cvss_scores]
+        if vuln.epss_scores:
+            data["epss_scores"] = [s.to_dict() for s in vuln.epss_scores]
+        if vuln.cwes:
+            data["cwes"] = [c.to_dict() for c in vuln.cwes]
+        if vuln.cpes:
+            data["cpes"] = vuln.cpes
+        if vuln.kev_entry is not None:
+            data["kev_entry"] = vuln.kev_entry.to_dict()
+        if vuln.exploits:
+            data["exploits"] = [e.to_dict() for e in vuln.exploits]
+
         if include_computed:
             data["state_label"] = vuln.state_label
             data["history_string"] = vuln.history_string
@@ -745,9 +810,12 @@ class CVDIO:
 
         from .constants import CVDEvent, string_to_state_int
         from .models import (
-            VulnerabilityEnrichment,
+            CVSSScore,
+            CWEEntry,
+            EPSSScore,
+            ExploitReference,
+            KEVEntry,
             VulnerabilityIdentity,
-            VulnerabilityScoring,
             VulnerabilityState,
         )
         from .vulnerability import CVDVulnerability
@@ -785,10 +853,6 @@ class CVDIO:
         # Ensure vuln_id is a string (use cve_id as fallback)
         final_vuln_id = vuln_id or data.get("cve_id") or ""
         vuln.identity = VulnerabilityIdentity(vuln_id=str(final_vuln_id), cve_id=data.get("cve_id"))
-        vuln.scoring = VulnerabilityScoring(
-            cvss_base_score=data.get("cvss_score"), cve_vector=data.get("cve_vector")
-        )
-        vuln.enrichment = VulnerabilityEnrichment(epss=data.get("epss"), kev=data.get("kev", False))
         vuln.state = VulnerabilityState(
             state_encoded=string_to_state_int(data.get("state", "vfdpxa")),
             events=events,
@@ -799,7 +863,26 @@ class CVDIO:
         inferred_names = data.get("inferred_events", [])
         vuln.state.inferred_events = {CVDEvent[name] for name in inferred_names}
 
+        # API v2 enrichment fields
+        vuln._cvss_scores = (
+            [CVSSScore.from_dict(s) for s in data["cvss_scores"]] if "cvss_scores" in data else []
+        )
+        vuln._epss_scores = (
+            [EPSSScore.from_dict(s) for s in data["epss_scores"]] if "epss_scores" in data else []
+        )
+        vuln._cwes = [CWEEntry.from_dict(c) for c in data["cwes"]] if "cwes" in data else []
+        vuln._cpes = data.get("cpes", [])
+        vuln._kev_entry = (
+            KEVEntry.from_dict(data["kev_entry"]) if data.get("kev_entry") is not None else None
+        )
+        vuln._exploits = (
+            [ExploitReference.from_dict(e) for e in data["exploits"]] if "exploits" in data else []
+        )
+
         vuln.metadata = data.get("metadata", {})
+
+        # Analytics cache
+        vuln._analytics = None
 
         return vuln
 
@@ -870,3 +953,38 @@ class CVDIO:
 
         vulns = [CVDIO.from_dict(d) for d in data]
         return CVDArray(vulns)
+
+    @staticmethod
+    def import_dict(
+        arr: "CVDArray",
+        data: list[dict[str, Any]],
+        on_error: str = "skip",
+    ) -> None:
+        """Import vulnerabilities from list of dicts into existing array.
+
+        Args:
+            arr: CVDArray instance to update
+            data: List of vulnerability dicts with cve_id, state, etc.
+            on_error: Error mode ("skip", "raise", "collect")
+        """
+        if not data:
+            return
+
+        from .vulnerability import CVDVulnerability
+
+        vulns: list[CVDVulnerability] = []
+        for record in data:
+            try:
+                vuln = CVDIO.from_dict(record)
+                vulns.append(vuln)
+            except Exception:
+                if on_error == "raise":
+                    raise
+                elif on_error == "collect":
+                    pass  # TODO: collect errors for reporting
+                # skip: continue to next record
+
+        if vulns:
+            # Get existing vulnerabilities and append new ones
+            existing = list(arr._vulnerabilities) if len(arr._vulnerabilities) > 0 else []
+            arr._from_list(existing + vulns)

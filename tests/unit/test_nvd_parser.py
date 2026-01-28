@@ -469,5 +469,356 @@ class TestRegressionScenarios:
         assert arr.get(1).cve_id == "CVE-2023-0002"
 
 
+class TestNVDParserV2Fields:
+    """Test NVDParser populating new API v2 enrichment fields."""
+
+    def test_create_vuln_populates_cvss_scores_v31(self):
+        """Parser creates CVSSScore objects from CVSS v3.1 metrics."""
+        from vulnstate.models import CVSSScore
+
+        item = {
+            "cve": {
+                "id": "CVE-2024-1234",
+                "metrics": {
+                    "cvssMetricV31": [
+                        {
+                            "source": "nvd@nist.gov",
+                            "type": "Primary",
+                            "cvssData": {
+                                "version": "3.1",
+                                "baseScore": 9.8,
+                                "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+                            },
+                            "exploitabilityScore": 3.9,
+                            "impactScore": 5.9,
+                        }
+                    ]
+                },
+            }
+        }
+        vuln = NVDParser.create_vuln_from_item("CVE-2024-1234", item, "2.0")
+
+        assert len(vuln.cvss_scores) >= 1
+        score = vuln.cvss_scores[0]
+        assert isinstance(score, CVSSScore)
+        assert score.version == 3.1
+        assert score.base_score == 9.8
+        assert score.vector == "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+        assert score.source == "nvd@nist.gov"
+
+    def test_create_vuln_populates_cvss_scores_multiple_versions(self):
+        """Parser creates CVSSScore objects for multiple CVSS versions."""
+        item = {
+            "cve": {
+                "id": "CVE-2024-1234",
+                "metrics": {
+                    "cvssMetricV31": [
+                        {
+                            "source": "nvd@nist.gov",
+                            "type": "Primary",
+                            "cvssData": {
+                                "version": "3.1",
+                                "baseScore": 9.8,
+                                "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+                            },
+                        }
+                    ],
+                    "cvssMetricV2": [
+                        {
+                            "source": "nvd@nist.gov",
+                            "type": "Primary",
+                            "cvssData": {
+                                "version": "2.0",
+                                "baseScore": 10.0,
+                                "vectorString": "AV:N/AC:L/Au:N/C:C/I:C/A:C",
+                            },
+                        }
+                    ],
+                },
+            }
+        }
+        vuln = NVDParser.create_vuln_from_item("CVE-2024-1234", item, "2.0")
+
+        # Should have scores from both v3.1 and v2
+        assert len(vuln.cvss_scores) >= 2
+        versions = {s.version for s in vuln.cvss_scores}
+        assert 3.1 in versions
+        assert 2.0 in versions
+
+    def test_create_vuln_populates_cwes(self):
+        """Parser creates CWEEntry objects from weaknesses."""
+        from vulnstate.models import CWEEntry
+
+        item = {
+            "cve": {
+                "id": "CVE-2024-1234",
+                "metrics": {},
+                "weaknesses": [
+                    {
+                        "source": "nvd@nist.gov",
+                        "type": "Primary",
+                        "description": [{"lang": "en", "value": "CWE-79"}],
+                    },
+                    {
+                        "source": "cna@vendor.com",
+                        "type": "Secondary",
+                        "description": [{"lang": "en", "value": "CWE-352"}],
+                    },
+                ],
+            }
+        }
+        vuln = NVDParser.create_vuln_from_item("CVE-2024-1234", item, "2.0")
+
+        assert len(vuln.cwes) >= 2
+        cwe_ids = [c.id for c in vuln.cwes]
+        assert "CWE-79" in cwe_ids
+        assert "CWE-352" in cwe_ids
+
+        # Check CWEEntry attributes
+        primary_cwe = next(c for c in vuln.cwes if c.id == "CWE-79")
+        assert isinstance(primary_cwe, CWEEntry)
+        assert primary_cwe.source == "nvd@nist.gov"
+        assert primary_cwe.primary is True
+
+        secondary_cwe = next(c for c in vuln.cwes if c.id == "CWE-352")
+        assert secondary_cwe.primary is False
+
+    def test_create_vuln_populates_cpes(self):
+        """Parser extracts CPE strings from configurations."""
+        item = {
+            "cve": {
+                "id": "CVE-2024-1234",
+                "metrics": {},
+                "configurations": [
+                    {
+                        "nodes": [
+                            {
+                                "operator": "OR",
+                                "negate": False,
+                                "cpeMatch": [
+                                    {
+                                        "vulnerable": True,
+                                        "criteria": "cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*",
+                                        "matchCriteriaId": "ABC123",
+                                    },
+                                    {
+                                        "vulnerable": True,
+                                        "criteria": "cpe:2.3:a:apache:log4j:2.15.0:*:*:*:*:*:*:*",
+                                        "matchCriteriaId": "DEF456",
+                                    },
+                                ],
+                            }
+                        ]
+                    }
+                ],
+            }
+        }
+        vuln = NVDParser.create_vuln_from_item("CVE-2024-1234", item, "2.0")
+
+        assert len(vuln.cpes) >= 2
+        assert "cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*" in vuln.cpes
+        assert "cpe:2.3:a:apache:log4j:2.15.0:*:*:*:*:*:*:*" in vuln.cpes
+
+    def test_create_vuln_populates_all_v2_fields(self):
+        """Parser populates all v2 fields from a complete NVD item."""
+        item = {
+            "cve": {
+                "id": "CVE-2024-1234",
+                "published": "2024-01-15T10:00:00.000",
+                "metrics": {
+                    "cvssMetricV31": [
+                        {
+                            "source": "nvd@nist.gov",
+                            "type": "Primary",
+                            "cvssData": {
+                                "version": "3.1",
+                                "baseScore": 9.8,
+                                "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+                            },
+                        }
+                    ]
+                },
+                "weaknesses": [
+                    {
+                        "source": "nvd@nist.gov",
+                        "type": "Primary",
+                        "description": [{"lang": "en", "value": "CWE-79"}],
+                    }
+                ],
+                "configurations": [
+                    {
+                        "nodes": [
+                            {
+                                "cpeMatch": [
+                                    {
+                                        "vulnerable": True,
+                                        "criteria": "cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*",
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ],
+            }
+        }
+        vuln = NVDParser.create_vuln_from_item("CVE-2024-1234", item, "2.0")
+
+        # cvss_scores populated
+        assert len(vuln.cvss_scores) >= 1
+        assert vuln.cvss_scores[0].base_score == 9.8
+
+        # cwes populated
+        assert len(vuln.cwes) >= 1
+        assert vuln.cwes[0].id == "CWE-79"
+
+        # cpes populated
+        assert len(vuln.cpes) >= 1
+        assert "cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*" in vuln.cpes
+
+    def test_import_nvd_populates_v2_fields(self):
+        """import_nvd populates v2 fields on all vulnerabilities."""
+        nvd_data = [
+            {
+                "cve": {
+                    "id": "CVE-2024-0001",
+                    "metrics": {
+                        "cvssMetricV31": [
+                            {
+                                "source": "nvd@nist.gov",
+                                "type": "Primary",
+                                "cvssData": {
+                                    "version": "3.1",
+                                    "baseScore": 7.5,
+                                    "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                                },
+                            }
+                        ]
+                    },
+                    "weaknesses": [
+                        {
+                            "source": "nvd@nist.gov",
+                            "type": "Primary",
+                            "description": [{"lang": "en", "value": "CWE-400"}],
+                        }
+                    ],
+                    "configurations": [
+                        {
+                            "nodes": [
+                                {
+                                    "cpeMatch": [
+                                        {
+                                            "vulnerable": True,
+                                            "criteria": "cpe:2.3:a:vendor:product:1.0:*:*:*:*:*:*:*",
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    ],
+                }
+            }
+        ]
+
+        arr = CVDArray()
+        NVDParser.import_nvd(arr, nvd_data)
+
+        assert len(arr) == 1
+        vuln = arr.get(0)
+
+        # Check v2 fields
+        assert len(vuln.cvss_scores) >= 1
+        assert vuln.cvss_scores[0].base_score == 7.5
+
+        assert len(vuln.cwes) >= 1
+        assert vuln.cwes[0].id == "CWE-400"
+
+        assert len(vuln.cpes) >= 1
+        assert "cpe:2.3:a:vendor:product:1.0:*:*:*:*:*:*:*" in vuln.cpes
+
+    def test_create_vuln_handles_missing_weaknesses(self):
+        """Parser handles items without weaknesses gracefully."""
+        item = {
+            "cve": {
+                "id": "CVE-2024-1234",
+                "metrics": {},
+                # No weaknesses field
+            }
+        }
+        vuln = NVDParser.create_vuln_from_item("CVE-2024-1234", item, "2.0")
+
+        assert vuln.cwes == []
+
+    def test_create_vuln_handles_missing_configurations(self):
+        """Parser handles items without configurations gracefully."""
+        item = {
+            "cve": {
+                "id": "CVE-2024-1234",
+                "metrics": {},
+                # No configurations field
+            }
+        }
+        vuln = NVDParser.create_vuln_from_item("CVE-2024-1234", item, "2.0")
+
+        assert vuln.cpes == []
+
+    def test_create_vuln_handles_nvd_cwe_other(self):
+        """Parser skips NVD-CWE-Other and NVD-CWE-noinfo entries."""
+        item = {
+            "cve": {
+                "id": "CVE-2024-1234",
+                "metrics": {},
+                "weaknesses": [
+                    {
+                        "source": "nvd@nist.gov",
+                        "type": "Primary",
+                        "description": [{"lang": "en", "value": "NVD-CWE-Other"}],
+                    },
+                    {
+                        "source": "nvd@nist.gov",
+                        "type": "Secondary",
+                        "description": [{"lang": "en", "value": "NVD-CWE-noinfo"}],
+                    },
+                    {
+                        "source": "cna@vendor.com",
+                        "type": "Secondary",
+                        "description": [{"lang": "en", "value": "CWE-89"}],
+                    },
+                ],
+            }
+        }
+        vuln = NVDParser.create_vuln_from_item("CVE-2024-1234", item, "2.0")
+
+        # Should only have CWE-89, not NVD-CWE-Other or NVD-CWE-noinfo
+        assert len(vuln.cwes) == 1
+        assert vuln.cwes[0].id == "CWE-89"
+
+    def test_create_vuln_handles_cvss_v40(self):
+        """Parser creates CVSSScore objects from CVSS v4.0 metrics."""
+        item = {
+            "cve": {
+                "id": "CVE-2024-1234",
+                "metrics": {
+                    "cvssMetricV40": [
+                        {
+                            "source": "nvd@nist.gov",
+                            "type": "Primary",
+                            "cvssData": {
+                                "version": "4.0",
+                                "baseScore": 8.7,
+                                "vectorString": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:L/VA:L/SC:N/SI:N/SA:N",
+                            },
+                        }
+                    ]
+                },
+            }
+        }
+        vuln = NVDParser.create_vuln_from_item("CVE-2024-1234", item, "2.0")
+
+        assert len(vuln.cvss_scores) >= 1
+        score = vuln.cvss_scores[0]
+        assert score.version == 4.0
+        assert score.base_score == 8.7
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
