@@ -1,25 +1,23 @@
 """Enrichment transforms (fetch external data).
 
 These transforms fetch data from external sources (CSV files, APIs)
-and populate the _source arrays. They are NOT data extractors -
-extractors read from already-populated source data.
+and populate vulnerability data. They follow the Transform protocol
+and delegate to CVDIO methods for actual implementation.
 
 Provides:
 - infer_events: Infer V/F/D events from metadata tags and heuristics
 - EventInferenceTransform: Class wrapper for infer_events following Transform protocol
-- EPSSEnricher: Load EPSS scores from epss.csv (placeholder)
-- KEVEnricher: Load KEV entries from kev.csv (placeholder)
+- EPSSEnricher: Load EPSS scores (delegates to CVDIO.import_epss)
+- KEVEnricher: Load KEV entries (delegates to CVDIO.import_kev)
 
 Layer: I/O
-Dependencies: models.py, array.py
+Dependencies: models.py, array.py, io.py
 Used by: array.py, User code
 """
 
 import contextlib
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Optional
-
-import numpy as np
 
 if TYPE_CHECKING:
     from vulnstate.array import CVDArray
@@ -166,65 +164,94 @@ def infer_events(
 
 
 class EPSSEnricher:
-    """Placeholder: Fetch EPSS scores from CSV and populate _source.
+    """Enrich array with EPSS scores via Transform protocol.
 
-    This enricher loads EPSS probability and percentile data from a CSV file
-    and matches it to vulnerabilities by CVE ID.
-
-    Future implementation will:
-    - Read CSV with columns: cve, epss, percentile
-    - Match by CVE ID to array entries
-    - Populate _source.epss_scores with EPSSScore objects
+    Delegates to CVDIO.import_epss() for actual implementation.
+    Two access patterns supported:
+    - Imperative: arr.import_epss("file.csv")
+    - Transform: arr.register_transform(EPSSEnricher("file.csv")); arr.transform()
 
     Attributes:
         name: Transform identifier ("epss_enricher")
-        csv_path: Path to EPSS CSV file
+        source: Path to EPSS CSV file or dict mapping CVE IDs to scores
 
-    Example (future):
+    Example:
         >>> enricher = EPSSEnricher("epss_scores.csv")
-        >>> enricher.apply(array)  # Populates array._source.epss_scores
+        >>> enricher.apply(array)  # Returns {"epss_enriched": N}
     """
 
     name = "epss_enricher"
 
-    def __init__(self, csv_path: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        source: "str | dict[str, float | dict[str, Any]]",
+        import_metadata: bool = False,
+        include: Optional[list[str]] = None,
+        exclude: Optional[list[str]] = None,
+    ) -> None:
         """Initialize EPSS enricher.
 
         Args:
-            csv_path: Path to EPSS CSV file (optional for now)
+            source: Path to EPSS CSV file or dict mapping CVE IDs to scores/metadata
+            import_metadata: Store full EPSS data in vuln.metadata['epss'] (default False)
+            include: Only store these fields (if import_metadata=True)
+            exclude: Skip these fields (if import_metadata=True)
         """
-        self.csv_path = csv_path
+        self.source = source
+        self.import_metadata = import_metadata
+        self.include = include
+        self.exclude = exclude
 
-    def apply(self, array: "CVDArray") -> dict[str, np.ndarray]:
+    def apply(self, array: "CVDArray") -> dict[str, int]:
         """Populate EPSS scores from external source.
 
-        This is a placeholder that returns empty dict.
-        Future implementation will populate array._source.epss_scores.
+        Delegates to CVDIO.import_epss() for actual implementation.
 
         Args:
             array: CVDArray to enrich
 
         Returns:
-            Empty dict (enrichers modify _source, not _cache)
-
-        Raises:
-            NotImplementedError: Always, until implemented
+            Summary dict: {"epss_enriched": N}
         """
-        raise NotImplementedError(
-            "EPSSEnricher not yet implemented. "
-            "Use CVDArray.import_epss() for current EPSS loading."
+        from vulnstate.io import CVDIO
+
+        # Count initial EPSS scores
+        initial_count = sum(
+            1 for i in range(len(array)) if array.get(i).epss is not None
         )
 
+        # Delegate to CVDIO
+        CVDIO.import_epss(
+            array,
+            self.source,
+            self.import_metadata,
+            self.include,
+            self.exclude,
+        )
+
+        # Count final EPSS scores
+        final_count = sum(
+            1 for i in range(len(array)) if array.get(i).epss is not None
+        )
+
+        return {"epss_enriched": final_count - initial_count}
+
     def apply_single(self, vuln: Any) -> None:
-        """Placeholder for single-item enrichment.
+        """Single-item enrichment not supported for EPSS.
+
+        EPSS data is loaded from files that contain many CVEs at once.
+        Use apply() on an array instead.
 
         Args:
             vuln: CVDVulnerability to enrich
 
         Raises:
-            NotImplementedError: Always, until implemented
+            NotImplementedError: Always
         """
-        raise NotImplementedError("EPSSEnricher.apply_single() not yet implemented")
+        raise NotImplementedError(
+            "EPSSEnricher.apply_single() not supported. "
+            "Use EPSSEnricher.apply() on a CVDArray instead."
+        )
 
 
 class EventInferenceTransform:
@@ -271,61 +298,91 @@ class EventInferenceTransform:
 
 
 class KEVEnricher:
-    """Placeholder: Fetch KEV entries from CSV and populate _source.
+    """Enrich array with KEV data via Transform protocol.
 
-    This enricher loads CISA Known Exploited Vulnerabilities (KEV) catalog
-    data from a CSV file and matches it to vulnerabilities by CVE ID.
-
-    Future implementation will:
-    - Read CSV with KEV columns: cveID, dateAdded, dueDate, etc.
-    - Match by CVE ID to array entries
-    - Populate _source.kev with KEVEntry objects
+    Delegates to CVDIO.import_kev() for actual implementation.
+    Two access patterns supported:
+    - Imperative: arr.import_kev("file.csv")
+    - Transform: arr.register_transform(KEVEnricher("file.csv")); arr.transform()
 
     Attributes:
         name: Transform identifier ("kev_enricher")
-        csv_path: Path to KEV CSV file
+        source: Path to KEV CSV file or dict mapping CVE IDs to KEV data
 
-    Example (future):
+    Example:
         >>> enricher = KEVEnricher("known_exploited_vulnerabilities.csv")
-        >>> enricher.apply(array)  # Populates array._source.kev
+        >>> enricher.apply(array)  # Returns {"kev_enriched": N}
     """
 
     name = "kev_enricher"
 
-    def __init__(self, csv_path: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        source: "str | dict[str, dict[str, Any]]",
+        apply_event: bool = True,
+        import_metadata: bool = False,
+        include: Optional[list[str]] = None,
+        exclude: Optional[list[str]] = None,
+    ) -> None:
         """Initialize KEV enricher.
 
         Args:
-            csv_path: Path to KEV CSV file (optional for now)
+            source: Path to KEV CSV file or dict mapping CVE IDs to KEV data
+            apply_event: Apply event A with dateAdded timestamp (default True)
+            import_metadata: Store full KEV data in vuln.metadata['kev'] (default False)
+            include: Only store these fields (if import_metadata=True)
+            exclude: Skip these fields (if import_metadata=True)
         """
-        self.csv_path = csv_path
+        self.source = source
+        self.apply_event = apply_event
+        self.import_metadata = import_metadata
+        self.include = include
+        self.exclude = exclude
 
-    def apply(self, array: "CVDArray") -> dict[str, np.ndarray]:
+    def apply(self, array: "CVDArray") -> dict[str, int]:
         """Populate KEV entries from external source.
 
-        This is a placeholder that returns empty dict.
-        Future implementation will populate array._source.kev.
+        Delegates to CVDIO.import_kev() for actual implementation.
 
         Args:
             array: CVDArray to enrich
 
         Returns:
-            Empty dict (enrichers modify _source, not _cache)
-
-        Raises:
-            NotImplementedError: Always, until implemented
+            Summary dict: {"kev_enriched": N}
         """
-        raise NotImplementedError(
-            "KEVEnricher not yet implemented. " "Use CVDArray.import_kev() for current KEV loading."
+        from vulnstate.io import CVDIO
+
+        # Count initial KEV entries
+        initial_count = sum(1 for i in range(len(array)) if array.get(i).kev)
+
+        # Delegate to CVDIO
+        CVDIO.import_kev(
+            array,
+            self.source,
+            self.apply_event,
+            self.import_metadata,
+            self.include,
+            self.exclude,
         )
 
+        # Count final KEV entries
+        final_count = sum(1 for i in range(len(array)) if array.get(i).kev)
+
+        return {"kev_enriched": final_count - initial_count}
+
     def apply_single(self, vuln: Any) -> None:
-        """Placeholder for single-item enrichment.
+        """Single-item enrichment not supported for KEV.
+
+        KEV data is loaded from files that contain many CVEs at once.
+        Use apply() on an array instead.
 
         Args:
             vuln: CVDVulnerability to enrich
 
         Raises:
-            NotImplementedError: Always, until implemented
+            NotImplementedError: Always
         """
-        raise NotImplementedError("KEVEnricher.apply_single() not yet implemented")
+        raise NotImplementedError(
+            "KEVEnricher.apply_single() not supported. "
+            "Use KEVEnricher.apply() on a CVDArray instead."
+        )

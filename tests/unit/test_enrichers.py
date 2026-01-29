@@ -269,3 +269,98 @@ class TestEnricherIntegration:
         # Check array-level properties
         assert arr.epss[0] == pytest.approx(0.85)
         assert arr.epss[1] == pytest.approx(0.15)
+
+
+class TestTransformProtocolEnrichers:
+    """Tests for using enrichers via Transform protocol pattern."""
+
+    def test_epss_enricher_apply(self):
+        """EPSSEnricher.apply() should delegate to CVDIO.import_epss()."""
+        from vulnstate.transforms import EPSSEnricher
+
+        vulns = [
+            CVDVulnerability(cve_id="CVE-2024-0001"),
+            CVDVulnerability(cve_id="CVE-2024-0002"),
+        ]
+        arr = CVDArray(vulns)
+
+        # Use enricher class directly
+        epss_data = {"CVE-2024-0001": 0.75, "CVE-2024-0002": 0.25}
+        enricher = EPSSEnricher(epss_data)
+        result = enricher.apply(arr)
+
+        # Verify enrichment worked
+        assert arr.get(0).epss == pytest.approx(0.75)
+        assert arr.get(1).epss == pytest.approx(0.25)
+        # Verify result summary
+        assert result == {"epss_enriched": 2}
+
+    def test_kev_enricher_apply(self):
+        """KEVEnricher.apply() should delegate to CVDIO.import_kev()."""
+        from vulnstate.transforms import KEVEnricher
+
+        vulns = [
+            CVDVulnerability(cve_id="CVE-2024-0001"),
+            CVDVulnerability(cve_id="CVE-2024-0002"),
+        ]
+        arr = CVDArray(vulns)
+
+        # Use enricher class directly
+        kev_data = {"CVE-2024-0001": {"dateAdded": "2024-01-15"}}
+        enricher = KEVEnricher(kev_data, apply_event=False)
+        result = enricher.apply(arr)
+
+        # Verify enrichment worked
+        assert arr.get(0).kev is True
+        assert arr.get(1).kev is False
+        # Verify result summary
+        assert result == {"kev_enriched": 1}
+
+    def test_epss_enricher_with_all_options(self):
+        """EPSSEnricher respects all constructor options."""
+        from vulnstate.transforms import EPSSEnricher
+
+        vulns = [CVDVulnerability(cve_id="CVE-2024-0001")]
+        arr = CVDArray(vulns)
+
+        epss_data = {"CVE-2024-0001": {"epss": 0.5, "percentile": 0.9, "extra": "data"}}
+        enricher = EPSSEnricher(
+            epss_data,
+            import_metadata=True,
+            include=["epss", "percentile"],  # Exclude "extra"
+        )
+        enricher.apply(arr)
+
+        vuln = arr.get(0)
+        assert vuln.epss == pytest.approx(0.5)
+        assert vuln.epss_percentile == pytest.approx(0.9)
+
+    def test_kev_enricher_with_event_application(self):
+        """KEVEnricher applies event A when apply_event=True."""
+        from vulnstate.transforms import KEVEnricher
+
+        vulns = [CVDVulnerability(cve_id="CVE-2024-0001")]
+        arr = CVDArray(vulns)
+
+        kev_data = {"CVE-2024-0001": {"dateAdded": "2024-01-15"}}
+        enricher = KEVEnricher(kev_data, apply_event=True)
+        enricher.apply(arr)
+
+        vuln = arr.get(0)
+        assert vuln.kev is True
+        assert vuln.has_event_occurred(CVDEvent.A)
+
+    def test_enricher_apply_single_not_supported(self):
+        """Enrichers don't support apply_single()."""
+        from vulnstate.transforms import EPSSEnricher, KEVEnricher
+
+        vuln = CVDVulnerability(cve_id="CVE-2024-0001")
+
+        epss_enricher = EPSSEnricher({"CVE-2024-0001": 0.5})
+        kev_enricher = KEVEnricher({"CVE-2024-0001": {"dateAdded": "2024-01-15"}})
+
+        with pytest.raises(NotImplementedError):
+            epss_enricher.apply_single(vuln)
+
+        with pytest.raises(NotImplementedError):
+            kev_enricher.apply_single(vuln)
