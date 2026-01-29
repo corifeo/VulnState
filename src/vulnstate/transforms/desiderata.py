@@ -461,12 +461,9 @@ class DesiderataExtractor:
         X_ts = ts.X
         A_ts = ts.A
 
-        def has(t: np.ndarray) -> np.ndarray:
-            return ~np.isnat(t)
-
-        def before(t1: np.ndarray, t2: np.ndarray) -> np.ndarray:
-            both_exist = has(t1) & has(t2)
-            return ~both_exist | (t1 < t2)
+        # Use instance methods for consistency (no duplication)
+        has = extractor._has
+        before = extractor._before
 
         def days_between(t1: np.ndarray, t2: np.ndarray) -> np.ndarray:
             result = np.full(n, np.nan, dtype=np.float32)
