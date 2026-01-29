@@ -647,30 +647,8 @@ class NVDParser:
 
         vuln = CVDVulnerability(cve_id)
 
-        # Extract CVSS score, vector, and sub-scores
-        cvss_score, cvss_vector, exploitability, impact = NVDParser.extract_cvss(
-            item, format_version
-        )
-        # Use list-based approach - create CVSSScore if we have a score
-        if cvss_score is not None:
-            from .models import CVSSScore
-
-            vuln.cvss_scores.append(
-                CVSSScore(
-                    version=3.1,
-                    base_score=cvss_score,
-                    vector=cvss_vector or "",
-                    source="nvd",
-                    source_status=None,
-                    reserved_at=None,
-                    published_at=None,
-                    updated_at=None,
-                    temporal_score=None,
-                    environmental_score=None,
-                )
-            )
-        vuln.cve_vector = cvss_vector
-        # Store sub-scores in metadata (no longer have scoring dataclass)
+        # Extract CVSS sub-scores for metadata (exploitability/impact)
+        _, _, exploitability, impact = NVDParser.extract_cvss(item, format_version)
         if exploitability is not None:
             vuln.metadata["cvss_exploitability_score"] = exploitability
         if impact is not None:
@@ -683,11 +661,13 @@ class NVDParser:
         # CWE entries (list of CWEEntry objects)
         vuln.cwes = NVDParser.extract_cwe_entries(item, format_version)
 
-        # CPE strings (list of CPE 2.3 URIs)
+        # CPE entries (parsed from CPE 2.3 URIs)
         cpe_strings = NVDParser.extract_all_cpes(item, format_version)
-        vuln.cpes = cpe_strings
+        from .models import CPE
 
-        # Also store in metadata for backward compatibility
+        vuln.cpes = [CPE.parse(cpe_str) for cpe_str in cpe_strings]
+
+        # Also store raw strings in metadata for backward compatibility
         if cpe_strings:
             vuln.metadata["cpe_strings"] = cpe_strings
 
@@ -1025,7 +1005,6 @@ class NVDParser:
                                     environmental_score=None,
                                 )
                             )
-                        vuln.cve_vector = cvss_vector
                         # Store sub-scores in metadata
                         if exploitability is not None:
                             vuln.metadata["cvss_exploitability_score"] = exploitability

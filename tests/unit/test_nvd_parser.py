@@ -616,8 +616,9 @@ class TestNVDParserV2Fields:
         vuln = NVDParser.create_vuln_from_item("CVE-2024-1234", item, "2.0")
 
         assert len(vuln.cpes) >= 2
-        assert "cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*" in vuln.cpes
-        assert "cpe:2.3:a:apache:log4j:2.15.0:*:*:*:*:*:*:*" in vuln.cpes
+        cpe_raws = [cpe.raw for cpe in vuln.cpes]
+        assert "cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*" in cpe_raws
+        assert "cpe:2.3:a:apache:log4j:2.15.0:*:*:*:*:*:*:*" in cpe_raws
 
     def test_create_vuln_populates_all_v2_fields(self):
         """Parser populates all v2 fields from a complete NVD item."""
@@ -673,7 +674,7 @@ class TestNVDParserV2Fields:
 
         # cpes populated
         assert len(vuln.cpes) >= 1
-        assert "cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*" in vuln.cpes
+        assert "cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*" in [cpe.raw for cpe in vuln.cpes]
 
     def test_import_nvd_populates_v2_fields(self):
         """import_nvd populates v2 fields on all vulnerabilities."""
@@ -733,7 +734,7 @@ class TestNVDParserV2Fields:
         assert vuln.cwes[0].id == "CWE-400"
 
         assert len(vuln.cpes) >= 1
-        assert "cpe:2.3:a:vendor:product:1.0:*:*:*:*:*:*:*" in vuln.cpes
+        assert "cpe:2.3:a:vendor:product:1.0:*:*:*:*:*:*:*" in [cpe.raw for cpe in vuln.cpes]
 
     def test_create_vuln_handles_missing_weaknesses(self):
         """Parser handles items without weaknesses gracefully."""
