@@ -1,5 +1,4 @@
-"""
-Data Models - Dataclasses and property descriptors
+"""Data Models - Dataclasses for vulnerability data and array storage.
 
 Provides:
 - CVSSScore: Single CVSS score from specific source with vector parsing
@@ -11,7 +10,6 @@ Provides:
 - AnalyticsResult: Computed analytics from CVDStateAnalyzer transform
 - ArraySource: Source of truth object arrays for CVDArray
 - VulnerabilityIdentity: ID fields (internal_id, cve_id)
-
 - AnalysisResult: Analytics output from DesiderataExtractor
 - ArrayState: CVD state bitmask array
 - ArrayTimestamps: Event timestamp arrays (V, F, D, P, X, A)
@@ -20,9 +18,12 @@ Provides:
 - ArrayMetadata: Metadata storage
 - compute_pair_mask(): Vectorized pair ordering computation
 
+Note: CVD state is managed by ScalarLifecycle (lifecycle.py), not by these models.
+These dataclasses provide storage for enrichment data and array columnar storage.
+
 Layer: Core
 Dependencies: constants.py
-Used by: vulnerability.py, array.py, serialization.py, io.py
+Used by: vulnerability.py, array.py, io.py
 """
 
 from dataclasses import dataclass, field

@@ -1,20 +1,40 @@
-"""
-CVD Array - Vectorized batch container for vulnerabilities
+"""CVD Array - Vectorized batch container for vulnerabilities.
 
 Provides:
 - CVDArray: Numpy-based batch operations on multiple vulnerabilities
-  - Factory methods: zeros(), ones(), random()
+  - Factory methods: zeros(), ones(), random(), generate()
   - Boolean masking and filtering
   - Batch event application
-  - State distribution analysis
+  - Lifecycle namespace for state access
 
-Key features:
-- O(N) vectorized operations
-- Dirty tracking for efficient sync
-- Analytics via DesiderataExtractor.analyze()
+Lifecycle Integration
+---------------------
+CVDArray provides vectorized lifecycle operations through arr.lifecycle:
+
+    arr.lifecycle.state           # State strings: ["VFdpxa", "vfdPxa", ...]
+    arr.lifecycle.fix_path        # FixPath values as uint8 array
+    arr.lifecycle.threat_state    # ThreatState values as uint8 array
+    arr.lifecycle.timestamps.V    # Vendor awareness timestamps (datetime64)
+    arr.lifecycle.apply_event(CVDEvent.P)  # Apply to all
+    arr.lifecycle.apply_event(CVDEvent.X, mask=high_risk)  # Apply to subset
+    arr.lifecycle.desiderata      # DesiderataExtractor for analytics
+
+On indexing (arr[i]), CVDArray reconstructs a ScalarLifecycle from columnar data
+and returns a CVDVulnerability with that lifecycle as its _lifecycle attribute.
+
+Storage Layout (columnar for vectorized ops):
+    - state_ints: uint8 array of 6-bit bitmasks
+    - internal_ids/cve_ids: object arrays
+    - timestamps.V/F/D/P/X/A: datetime64 arrays
+    - _vulnerabilities: object array of live CVDVulnerability refs
+
+Key Features:
+- O(N) vectorized operations with numpy acceleration
+- Dirty tracking for efficient sync between live objects and columnar data
+- Analytics via arr.lifecycle.desiderata
 
 Layer: Batch
-Dependencies: constants.py, states.py, models.py, vulnerability.py
+Dependencies: constants.py, models.py, lifecycle.py, vulnerability.py
 Used by: io.py
 """
 

@@ -1,12 +1,65 @@
 # src/vulnstate/lifecycle.py
-"""CVD Lifecycle State Machine.
+"""CVD Lifecycle State Machine - Single Source of Truth for CVD State.
 
-Provides:
+Design Philosophy
+-----------------
+This module implements the CVD (Coordinated Vulnerability Disclosure) state machine
+as defined in the CERT/CC CVD model. The lifecycle tracks 6 events (VFDPXA) and
+their temporal relationships to classify vulnerability disclosure quality.
+
+CVDLifecycle (via ScalarLifecycle/VectorLifecycle) is the SINGLE SOURCE OF TRUTH
+for all CVD state. Other classes delegate to lifecycle rather than duplicating logic:
+
+    CVDVulnerability._lifecycle  -> ScalarLifecycle (scalar context)
+    CVDArray.lifecycle           -> LifecycleNamespace (vectorized context)
+
+State Representation
+--------------------
+- **Bitmask (6 bits)**: Encodes which events have occurred (V=bit0, F=bit1, ..., A=bit5)
+- **Timestamps**: Dict mapping CVDEvent -> datetime for temporal ordering
+- **Pair mask (15 bits)**: Encodes pairwise event ordering (computed lazily from timestamps)
+
+The 6 CVD Events:
+    V - Vendor awareness    (vendor knows about vulnerability)
+    F - Fix ready           (patch/fix is available)
+    D - Fix deployed        (fix is deployed/remediated)
+    P - Public awareness    (vulnerability is publicly known)
+    X - Exploit public      (exploit code is publicly available)
+    A - Attacks observed    (active exploitation in the wild)
+
+Constraints:
+    V -> F -> D  (fix path must be sequential)
+    P, X, A      (no ordering constraints among these)
+
+Key Properties Derived from State
+---------------------------------
+- state: String like "VFdpxa" (uppercase = occurred, lowercase = not occurred)
+- fix_path: FixPath enum (UNAWARE, VENDOR_AWARE, FIX_READY, REMEDIATED)
+- threat_state: ThreatState enum (LATENT, DISCLOSED, WEAPONIZED, etc.)
+- pair_mask: 15-bit mask encoding which event pairs have "good" ordering
+- summary: Human-readable description of current state
+
+Usage Patterns
+--------------
+Scalar (single vulnerability):
+    >>> lifecycle = ScalarLifecycle()
+    >>> lifecycle.apply_event(CVDEvent.V, timestamp=datetime.now())
+    >>> lifecycle.state  # "Vfdpxa"
+    >>> lifecycle.timestamps.V  # datetime when V occurred
+    >>> lifecycle.has_event(CVDEvent.V)  # True
+
+Vector (batch operations):
+    >>> arr.lifecycle.apply_event(CVDEvent.P)  # Apply to all
+    >>> arr.lifecycle.apply_event(CVDEvent.X, mask=high_risk)  # Apply to subset
+    >>> arr.lifecycle.states  # ["VFdPxa", "vfdPxa", ...]
+
+Provides
+--------
 - LifecycleState: Abstract base for CVD lifecycle
-- ScalarLifecycle: Single-item lifecycle (pure Python)
-- ScalarTimestampsNamespace: Namespace for vuln.lifecycle.timestamps.V/F/D/P/X/A
-- VectorLifecycle: Vectorized lifecycle (numpy arrays)
-- TimestampsNamespace: Namespace for arr.lifecycle.timestamps.V/F/D/P/X/A (vector)
+- ScalarLifecycle: Single-item lifecycle (pure Python, used by CVDVulnerability)
+- ScalarTimestampsNamespace: Attribute access for timestamps (lifecycle.timestamps.V)
+- VectorLifecycle: Vectorized lifecycle (numpy arrays, used internally by CVDArray)
+- TimestampsNamespace: Vector timestamp access (arr.lifecycle.timestamps.V)
 - LifecycleNamespace: Public API namespace for arr.lifecycle.*
 
 Layer: Core
@@ -114,13 +167,37 @@ class ScalarTimestampsNamespace:
 
 
 class ScalarLifecycle(LifecycleState):
-    """Single-item lifecycle. Pure Python, no numpy overhead."""
+    """Single-item CVD lifecycle state machine.
+
+    This is the canonical implementation for single vulnerabilities. CVDVulnerability
+    stores a ScalarLifecycle instance as its _lifecycle attribute and delegates all
+    state queries to it.
+
+    Attributes:
+        _bitmask: 6-bit integer encoding which events have occurred (VFDPXA)
+        _timestamps: Dict mapping occurred events to their timestamps
+        _pair_mask: 15-bit mask encoding pairwise event ordering (lazy computed)
+
+    Example:
+        >>> lc = ScalarLifecycle()
+        >>> lc.apply_event(CVDEvent.V, timestamp=datetime(2024, 1, 1))
+        >>> lc.apply_event(CVDEvent.P, timestamp=datetime(2024, 1, 15))
+        >>> lc.state  # "VfdPxa"
+        >>> lc.fix_path  # FixPath.VENDOR_AWARE
+        >>> lc.timestamps.V  # datetime(2024, 1, 1)
+    """
 
     def __init__(
         self,
         bitmask: int = 0,
         timestamps: Optional[dict[CVDEvent, Optional[datetime]]] = None,
     ) -> None:
+        """Initialize lifecycle state.
+
+        Args:
+            bitmask: Initial 6-bit state (default 0 = no events occurred)
+            timestamps: Optional dict of event timestamps for reconstruction
+        """
         self._bitmask: int = bitmask
         self._pair_mask: int = 0
         self._timestamps: dict[CVDEvent, Optional[datetime]] = timestamps or {}
@@ -199,7 +276,19 @@ class ScalarLifecycle(LifecycleState):
 
 
 class VectorLifecycle(LifecycleState):
-    """Vectorized lifecycle. Fixed or dynamic sizing."""
+    """Vectorized CVD lifecycle for batch operations.
+
+    Internal implementation used by CVDArray for efficient columnar storage.
+    Stores bitmasks and timestamps as numpy arrays for vectorized operations.
+
+    This class is not part of the public API - users interact with CVDArray.lifecycle
+    (LifecycleNamespace) which provides a user-friendly interface.
+
+    Attributes:
+        _bitmask_arr: Array of 6-bit state integers (uint8)
+        _pair_mask_arr: Array of 15-bit ordering masks (uint16)
+        _timestamps_arr: Dict of event -> datetime64 arrays
+    """
 
     def __init__(self, n: int = 0, *, fixed: bool = False) -> None:
         self._fixed = fixed
