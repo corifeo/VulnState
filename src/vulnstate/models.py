@@ -33,7 +33,7 @@ from uuid import uuid4
 
 import numpy as np
 
-from .constants import CVDEvent, FixPath, ThreatState
+from .constants import CVDEvent
 
 __all__ = [
     # New API v2 dataclasses
@@ -47,7 +47,6 @@ __all__ = [
     "KEV",
     "ExploitReference",
     "ScoreResult",
-    "AnalyticsResult",
     "ArraySource",
     # Core dataclasses
     "AnalysisResult",
@@ -462,29 +461,6 @@ class ScoreResult:
     cpe_count: int
     vendors: set[str]
     products: set[str]
-
-
-@dataclass(frozen=True)
-class AnalyticsResult:
-    """Computed analytics from CVDStateAnalyzer.apply_single()."""
-
-    fix_path: FixPath
-    threat_state: ThreatState
-    is_zero_day: bool
-    is_zero_day_exploit: bool
-    is_zero_day_attack: bool
-    is_coordinated: bool
-    is_premature_disclosure: bool
-    is_responsible_disclosure: bool
-    has_fix_before_exploit: bool
-    has_fix_before_attack: bool
-    is_private_attack: bool
-    is_weaponized: bool
-    is_mass_exploitation: bool
-    is_fix_available: bool
-    is_fix_deployed: bool
-    is_under_attack: bool
-    fix_lag_days: Optional[float]
 
 
 @dataclass

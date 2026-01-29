@@ -53,7 +53,6 @@ from .lifecycle import (
 )
 from .models import (
     AnalysisResult,
-    AnalyticsResult,
     ArraySource,
     CVSSScore,
     CWEEntry,
@@ -63,7 +62,6 @@ from .models import (
     ScoreResult,
 )
 from .transforms import (
-    CVDStateAnalyzer,
     DesiderataExtractor,
     ScoreExtractor,
     Transform,
@@ -105,12 +103,11 @@ __all__ = [
     "KEVEntry",
     "ExploitReference",
     "ScoreResult",
-    "AnalyticsResult",
     "ArraySource",
     # Transform classes
     "Transform",
     "ScoreExtractor",
-    "CVDStateAnalyzer",
+    "DesiderataExtractor",
     # Version
     "__version__",
 ]

@@ -655,34 +655,6 @@ class TestArraySource:
         assert sliced.cvss_scores[0][0].base_score == 9.8
 
 
-class TestAnalyticsResult:
-    def test_analytics_result_creation(self):
-        from vulnstate.constants import FixPath, ThreatState
-        from vulnstate.models import AnalyticsResult
-
-        result = AnalyticsResult(
-            fix_path=FixPath.REMEDIATED,
-            threat_state=ThreatState.LATENT,
-            is_zero_day=False,
-            is_zero_day_exploit=False,
-            is_zero_day_attack=False,
-            is_coordinated=True,
-            is_premature_disclosure=False,
-            is_responsible_disclosure=True,
-            has_fix_before_exploit=True,
-            has_fix_before_attack=True,
-            is_private_attack=False,
-            is_weaponized=True,
-            is_mass_exploitation=False,
-            is_fix_available=True,
-            is_fix_deployed=True,
-            is_under_attack=True,
-            fix_lag_days=30.0,
-        )
-        assert result.is_coordinated is True
-        assert result.fix_lag_days == 30.0
-
-
 class TestCVSSMetrics:
     def test_create_empty(self):
         from vulnstate.models import CVSSMetrics

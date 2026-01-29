@@ -186,10 +186,9 @@ class CVDArray:
 
     def _register_core_transforms(self) -> None:
         """Register built-in transforms."""
-        from vulnstate.transforms import CVDStateAnalyzer, ScoreExtractor
+        from vulnstate.transforms import ScoreExtractor
 
         self._transform_registry["scores"] = ScoreExtractor()
-        self._transform_registry["analytics"] = CVDStateAnalyzer()
 
     def __getattr__(self, name: str) -> Any:
         """Lazy dispatch to registered transforms."""

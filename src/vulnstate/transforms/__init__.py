@@ -3,7 +3,7 @@
 Provides:
 - Transform: Protocol for pluggable computation units
 - ScoreExtractor: Extract CVSS/EPSS/enrichment data into computed slots
-- CVDStateAnalyzer: Compute CVD analytics (desiderata) from state
+- DesiderataExtractor: Compute CVD analytics (desiderata) from state
 
 Layer: Analytics
 Dependencies: models.py, constants.py
@@ -47,7 +47,6 @@ class Transform(Protocol[T_co]):
         ...
 
 
-from vulnstate.transforms.analyzers import CVDStateAnalyzer  # noqa: E402
 from vulnstate.transforms.desiderata import DesiderataExtractor  # noqa: E402
 from vulnstate.transforms.enrichers import (  # noqa: E402
     EPSSEnricher,
@@ -61,7 +60,6 @@ __all__ = [
     "Transform",
     "ScoreExtractor",
     "parse_cpe",
-    "CVDStateAnalyzer",
     "DesiderataExtractor",
     "EPSSEnricher",
     "EventInferenceTransform",
