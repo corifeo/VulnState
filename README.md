@@ -72,7 +72,15 @@ vuln.threat_state    # ThreatState.DISCLOSED
 vuln.is_zero_day              # False
 vuln.is_coordinated           # True (V before P)
 vuln.is_responsible_disclosure  # True (V->F->P maintained)
+
+# Display helpers
+print(vuln.summary)           # Multi-line status summary
+print(vuln.format_timeline()) # Chronological event list
 ```
+
+### Jupyter Support
+
+In Jupyter notebooks, vulnerabilities render as formatted HTML tables automatically via `_repr_html_`.
 
 ### Serialization
 
@@ -322,10 +330,12 @@ Events:
 |--------|---------|
 | `vulnerability.py` | `CVDVulnerability` - single instance state machine |
 | `array.py` | `CVDArray` - vectorized batch container |
+| `lifecycle.py` | `CVDLifecycle` - single source of truth for CVD state |
 | `analyzer.py` | `CVDAnalyzer` - computed analytics engine |
 | `constants.py` | `CVDEvent`, state encoding, desiderata definitions |
 | `io.py` | `CVDIO` - NVD/EPSS/KEV import, serialization |
 | `parsers.py` | `NVDParser` - NVD JSON parsing (1.1 and 2.0) |
+| `formatting.py` | `CVDFormatter` - summary and timeline display |
 | `models.py` | `AnalysisResult`, array dataclasses |
 
 ## Examples
@@ -342,7 +352,7 @@ uv run python examples/05_data_import.py
 
 ```bash
 uv sync                              # Install dependencies
-uv run pytest tests/ -v              # Run tests (493 passing)
+uv run pytest tests/ -v              # Run tests (700 passing)
 uv run mypy src/ --strict            # Type checking
 uv run ruff check src/ tests/        # Linting
 ```
