@@ -6,6 +6,8 @@ This document provides guidance for AI assistants working with the vulnstate cod
 
 **vulnstate** is a Python library for tracking and analyzing vulnerability disclosure lifecycles at scale. It implements the SEI/CMU Coordinated Vulnerability Disclosure (CVD) state machine model, enabling analysis of how vulnerabilities move through their lifecycle from discovery to remediation.
 
+The library is evolving toward an **ETL pipeline architecture** for vulnerability data processing: Extract from multiple sources (NVD, EPSS, KEV), Transform via analytics and enrichment, Load into various output formats.
+
 **Version:** 0.2.0 (Alpha)
 **Python:** 3.9 - 3.13
 **License:** MIT
@@ -37,11 +39,11 @@ vulnstate/
 │   ├── parsers.py           # NVD JSON parsing (1.1 and 2.0 formats)
 │   ├── formatting.py        # Rich console output formatting
 │   ├── factories.py         # Factory methods for array creation
-│   └── transforms/          # Analytics pipeline
+│   └── transforms/          # ETL transform stage
 │       ├── __init__.py      # Transform protocol definition
-│       ├── desiderata.py    # DesiderataExtractor - CVD analytics engine
-│       ├── enrichers.py     # EPSS/KEV enrichment
-│       └── extractors.py    # CVSS/CPE parsing
+│       ├── desiderata.py    # DesiderataExtractor - CVD analytics
+│       ├── enrichers.py     # EPSS/KEV enrichment (external data)
+│       └── extractors.py    # CVSS/CPE extraction
 ├── tests/                   # Test suite (~688 tests)
 │   ├── conftest.py          # Shared fixtures
 │   ├── unit/                # Component-level tests
@@ -97,22 +99,30 @@ Single vulnerability instance with state machine. Delegates all state to `Scalar
 
 ```python
 from vulnstate import CVDVulnerability, CVDEvent
+from datetime import datetime
 
 vuln = CVDVulnerability("CVE-2024-1234", cvss_score=9.1)
 vuln.apply_event(CVDEvent.V, timestamp=datetime(2024, 1, 1))
 vuln.state_str       # 'Vfdpxa'
-vuln.is_zero_day     # False (V occurred first)
 ```
 
 ### CVDArray (`array.py`)
-Vectorized batch container using NumPy columnar storage. Operates on thousands of vulnerabilities efficiently.
+Vectorized batch container using NumPy columnar storage. The primary interface for ETL operations at scale.
 
 ```python
 from vulnstate import CVDArray
 
-arr = CVDArray.generate(1000, seed=42)  # Realistic timelines
-arr.is_zero_day       # bool array
-arr.desiderata_score  # float array
+# Extract: Load from sources
+arr = CVDArray()
+arr.import_nvd('nvdcve-2024.json')
+arr.import_epss('epss_scores.csv')
+arr.import_kev('known_exploited.csv')
+
+# Transform: Compute analytics
+# (transforms run explicitly, not lazily)
+
+# Load: Export results
+df = arr.to_dataframe(include_analytics=True)
 ```
 
 ### CVDLifecycle (`lifecycle.py`)
@@ -122,8 +132,11 @@ Abstract state machine with two implementations:
 
 **Single Source of Truth Pattern:** All state lives in the lifecycle, not duplicated.
 
-### DesiderataExtractor (`transforms/desiderata.py`)
-Computes all CVD analytics from state: fix_path, threat_state, pair_mask, validity, desiderata scores (0-12).
+### Transforms (`transforms/`)
+ETL transform stage implementations:
+- `DesiderataExtractor`: CVD analytics (fix_path, threat_state, desiderata scores)
+- `ScoreExtractor`: CVSS vector parsing
+- `EPSSEnricher`/`KEVEnricher`: External data enrichment
 
 ## Development Commands
 
@@ -191,30 +204,34 @@ def method(self, param: str) -> bool:
 - Raise `ValueError` for invalid state transitions (e.g., applying F before V)
 - Use custom exceptions from `constants.py`: `TransformNotRunError`, `ArrayFullError`
 
-## Design Patterns
+## Architecture: ETL Pipeline
 
-### Single Source of Truth
-`CVDLifecycle` owns all state. `CVDVulnerability` and `CVDArray` delegate, never duplicate.
+The library is evolving toward a proper ETL (Extract-Transform-Load) pipeline for vulnerability data:
 
-### Delegation Pattern
-`CVDVulnerability` delegates to `ScalarLifecycle`, `CVDArray` delegates to `VectorLifecycle`.
+### Extract Stage
+- **Sources:** NVD JSON (1.1/2.0), EPSS CSV, KEV CSV, generic CSV/JSON
+- **Entry points:** `io.py` import methods, `parsers.py` for complex formats
+- **Pattern:** Each source maps to CVD events with timestamps
 
-### Transform Protocol
-Pluggable analytics via `Transform` protocol in `transforms/__init__.py`. Implementations:
-- `DesiderataExtractor`: CVD analytics
-- `ScoreExtractor`: CVSS parsing
-- `EPSSEnricher`/`KEVEnricher`: External data enrichment
+### Transform Stage
+- **Location:** `transforms/` directory
+- **Protocol:** `Transform` base class in `transforms/__init__.py`
+- **Implementations:**
+  - `DesiderataExtractor`: CVD analytics (fix_path, threat_state, desiderata scores)
+  - `ScoreExtractor`: CVSS vector parsing
+  - `EPSSEnricher`/`KEVEnricher`: External data enrichment
 
-### Lazy Evaluation
-Analytics computed on-demand via `@property`, cached until state changes:
-```python
-@property
-def is_zero_day(self) -> bool:
-    return self._lifecycle.desiderata.is_zero_day
-```
+### Load Stage
+- **Outputs:** JSON, DataFrame, pickle, dict batches
+- **Methods:** `to_json()`, `to_dataframe()`, `to_dict()`
 
-### Dirty Tracking
-Arrays track modified indices for efficient sync between live objects and columnar data.
+### Core Design Principles
+
+**Single Source of Truth:** `CVDLifecycle` owns all state. `CVDVulnerability` and `CVDArray` delegate, never duplicate.
+
+**Delegation Pattern:** `CVDVulnerability` delegates to `ScalarLifecycle`, `CVDArray` delegates to `VectorLifecycle`.
+
+**Explicit over Implicit:** Prefer explicit transform/compute calls over magic property access. The codebase is moving away from lazy evaluation patterns.
 
 ## Testing Patterns
 
@@ -243,23 +260,29 @@ def test_is_coordinated(state, expected):
 
 ## Common Tasks
 
-### Adding a New Property to CVDVulnerability
-1. Add to `ScalarLifecycle` if it's state-derived
-2. Add property in `CVDVulnerability` that delegates to lifecycle
-3. Add corresponding vectorized version in `CVDArray`
-4. Add tests in `tests/unit/test_vulnerability.py` and `tests/unit/test_array.py`
+### Adding a New Data Source (Extract)
+1. Add parser in `parsers.py` if format is complex
+2. Add import method in `io.py`
+3. Map source fields to CVD events with timestamps
+4. Add convenience wrapper in `CVDArray`
+5. Add tests in `tests/integration/test_io.py`
+
+### Adding a New Transform
+1. Create new class implementing `Transform` protocol in `transforms/`
+2. Define `extract()` method that computes derived data
+3. Register in `transforms/__init__.py` exports
+4. Add tests in `tests/unit/test_transforms.py`
 
 ### Adding a New Analytics Metric
 1. Add computation in `transforms/desiderata.py`
 2. Expose via `DesiderataExtractor`
-3. Add property wrappers in `CVDVulnerability` and `CVDArray`
+3. Add accessor in `CVDVulnerability` and `CVDArray`
 4. Add tests in `tests/unit/test_transforms.py`
 
-### Adding a New Import Format
-1. Add parser method in `parsers.py` if complex
-2. Add import method in `io.py`
-3. Add convenience wrapper in `CVDArray`
-4. Add tests in `tests/integration/test_io.py`
+### Adding a New Output Format (Load)
+1. Add serialization method in `io.py`
+2. Add convenience wrapper in `CVDArray`
+3. Add tests in `tests/integration/test_io.py`
 
 ## Important Notes
 
@@ -284,6 +307,22 @@ vuln.apply_event(CVDEvent.F)  # Raises: V must precede F
 - Avoid loops over individual vulnerabilities when possible
 - Use boolean masks for filtering, not list comprehensions
 
+## Architectural Direction
+
+The codebase is evolving from a state-machine-with-properties model toward a proper ETL pipeline:
+
+**Being phased out:**
+- Lazy evaluation via `@property` with caching
+- Magic property access that triggers computation
+- Dirty tracking for automatic sync
+
+**Being adopted:**
+- Explicit transform/compute calls
+- Clear ETL stage separation (Extract → Transform → Load)
+- Batch-first operations with NumPy
+
+When adding new features, prefer explicit methods over lazy properties.
+
 ## Key Files for Understanding the Codebase
 
 1. `constants.py`: Start here for CVDEvent enum and state encoding
@@ -291,6 +330,7 @@ vuln.apply_event(CVDEvent.F)  # Raises: V must precede F
 3. `vulnerability.py`: High-level API for single vulnerabilities
 4. `array.py`: Batch operations API
 5. `transforms/desiderata.py`: Analytics computation logic
+6. `io.py`: ETL extract/load operations
 
 ## Public API Exports
 
