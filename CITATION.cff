@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+message: "If you use vulnstate in your research, please cite it as below."
+title: "vulnstate: Coordinated Vulnerability Disclosure lifecycle analytics"
+type: software
+authors:
+  - family-names: Manzoni
+    given-names: Francesco
+version: 0.2.0
+license: MIT
+repository-code: "https://github.com/corifeo/vulnstate"
+keywords:
+  - vulnerability management
+  - coordinated vulnerability disclosure
+  - CVE
+  - EPSS
+  - CISA KEV
+references:
+  - type: report
+    title: "A State-Based Model for Multi-Party Coordinated Vulnerability Disclosure (MPCVD)"
+    authors:
+      - family-names: Householder
+        given-names: Allen D.
+      - family-names: Spring
+        given-names: Jonathan
+    institution:
+      name: "Software Engineering Institute, Carnegie Mellon University"
+    number: "CMU/SEI-2021-SR-021"
+    year: 2021
+    doi: "10.1184/R1/16416771"
