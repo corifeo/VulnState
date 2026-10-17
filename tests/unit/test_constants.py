@@ -314,3 +314,12 @@ def test_probability_defaults():
 
     assert DEFAULT_XA_SPLIT == 0.5
     assert DEFAULT_THREAT_MULTIPLIER == 1.0
+
+
+def test_version_comes_from_package_metadata():
+    """__version__ is read from pyproject.toml via package metadata, not hard-coded."""
+    from importlib.metadata import version
+
+    import vulnstate
+
+    assert vulnstate.__version__ == version("vulnstate")

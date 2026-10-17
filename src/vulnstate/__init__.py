@@ -32,6 +32,8 @@ Advanced Usage:
     >>> from vulnstate.constants import string_to_state_int
 """
 
+from importlib.metadata import version
+
 from .array import CVDArray
 from .constants import (
     DESIDERATA_PAIRS,
@@ -68,7 +70,7 @@ from .transforms import (
 )
 from .vulnerability import TIMESTAMP_UNKNOWN, CVDVulnerability
 
-__version__ = "0.2.0"
+__version__ = version("vulnstate")  # single source: pyproject.toml
 
 __all__ = [
     # Core classes

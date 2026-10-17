@@ -1,0 +1,26 @@
+name: Release
+on:
+  push:
+    branches: [master]
+    paths: [pyproject.toml]
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Tag and release if this version is new
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+        run: |
+          V=$(python -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          if git ls-remote --exit-code --tags origin "refs/tags/v$V" >/dev/null; then echo "v$V exists"; exit 0; fi
+          awk -v v="$V" '$0 ~ "^## "v" " {f=1; next} /^## /{f=0} f' CHANGELOG.md > notes.md
+          test -s notes.md || { echo "CHANGELOG.md has no notes for $V"; exit 1; }
+          gh release create "v$V" --target "$(git log -1 --format=%H -- pyproject.toml)" --title "v$V" --notes-file notes.md
