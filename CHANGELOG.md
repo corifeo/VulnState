@@ -2,10 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Every user-visible change adds a line under `## Unreleased` in the same PR.
 
-## [Unreleased]
+## Unreleased
 
 ### Fixed
 - Desiderata masks used the 15-bit pair layout instead of `DesiderataBit` order: `where_desiderata_satisfied`/`where_desiderata_violated`, `get_*_desiderata`, `desiderata_mask` and `format_desiderata` reported the wrong desiderata
@@ -19,8 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - `pytest` moved from runtime dependencies to the `dev` group
+- `vulnstate.__version__` is read from package metadata (`pyproject.toml` is the only place the version is set)
 
-## [0.2.0] - 2026-01-20
+## 0.2.0 (2026-01-20)
 
 ### Breaking Changes
 
@@ -199,7 +199,7 @@ high_priority = arr[
 ]
 ```
 
-## [0.1.0] - 2026-01-13
+## 0.1.0 (2026-01-13)
 
 ### Added
 

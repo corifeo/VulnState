@@ -22,3 +22,16 @@ jobs:
       - run: uv run pytest
       - if: matrix.python-version == '3.13'
         run: uv run ruff check src tests scripts
+
+  changelog:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: CHANGELOG.md has a heading for the pyproject.toml version
+        run: |
+          V=$(python -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          grep -q "^## $V (" CHANGELOG.md || { echo "::error::CHANGELOG.md has no '## $V (' heading"; exit 1; }
