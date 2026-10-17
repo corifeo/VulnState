@@ -7,8 +7,10 @@ class TestTransformProtocol:
     def test_transform_protocol_exists(self):
         from vulnstate.transforms import Transform
 
-        # Protocol attributes are in __protocol_attrs__
-        protocol_attrs = getattr(Transform, "__protocol_attrs__", set())
+        # __protocol_attrs__ only exists on Python 3.12+; fall back to the class body
+        protocol_attrs = getattr(Transform, "__protocol_attrs__", None) or (
+            set(Transform.__annotations__) | set(vars(Transform))
+        )
         assert "name" in protocol_attrs
         assert "apply" in protocol_attrs
         assert "apply_single" in protocol_attrs
