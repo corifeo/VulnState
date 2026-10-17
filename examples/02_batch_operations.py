@@ -25,10 +25,12 @@ console = Console()
 
 def create_sample_dataset(size: int) -> CVDArray:
     """Create a sample vulnerability dataset using CVDArray.generate()."""
-    return CVDArray.generate(
+    arr = CVDArray.generate(
         size,
         vendors=["Apache", "Microsoft", "Apple", "Linux", "OpenSSL", "Nginx"],
     )
+    arr.transform()  # compute analytics before reading them
+    return arr
 
 
 def section_1_creating_arrays():
@@ -65,9 +67,9 @@ def section_1_creating_arrays():
     )
     console.print()
 
-    zeros = CVDArray.zeros(5, vuln_id_prefix="INIT")
-    ones = CVDArray.ones(5, vuln_id_prefix="TERM")
-    randoms = CVDArray.random(5, vuln_id_prefix="RND", seed=42)
+    zeros = CVDArray.zeros(5, internal_id_prefix="INIT")
+    ones = CVDArray.ones(5, internal_id_prefix="TERM")
+    randoms = CVDArray.random(5, internal_id_prefix="RND", seed=42)
 
     console.print(f"  zeros(5):  {set(zeros.states)}")
     console.print(f"  ones(5):   {set(ones.states)}")
@@ -301,7 +303,7 @@ def main():
     )
     console.print()
     console.print("  03_risk_analysis.py  - Risk assessment workflow")
-    console.print("  cvd_workflow.ipynb   - Interactive Jupyter notebook")
+    console.print("  06_data_science_workflow.ipynb - Interactive Jupyter notebook")
     console.print()
 
 
