@@ -68,7 +68,7 @@ Used by: vulnerability.py, array.py
 """
 
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import date, datetime, timezone
 from typing import TYPE_CHECKING, Optional, Union
 
 import numpy as np
@@ -89,6 +89,27 @@ from vulnstate.constants import (
 if TYPE_CHECKING:
     from vulnstate.array import CVDArray
     from vulnstate.transforms.desiderata import DesiderataExtractor
+
+
+def _to_naive_utc(timestamp: object) -> Optional[datetime]:
+    """Normalize a timestamp to a naive UTC datetime so mixed sources compare safely.
+
+    NVD yields tz-aware datetimes, CSV/KEV dates are naive, and day-precision
+    np.datetime64 unboxes to datetime.date - none of which compare with each other.
+    """
+    if timestamp is None:
+        return None
+    if isinstance(timestamp, np.datetime64):
+        if np.isnat(timestamp):
+            return None
+        timestamp = timestamp.astype("datetime64[us]").item()
+    if isinstance(timestamp, datetime):
+        if timestamp.tzinfo is not None:
+            timestamp = timestamp.astimezone(timezone.utc).replace(tzinfo=None)
+        return timestamp
+    if isinstance(timestamp, date):
+        return datetime(timestamp.year, timestamp.month, timestamp.day)
+    return timestamp  # type: ignore[return-value]
 
 
 class LifecycleState(ABC):
@@ -269,8 +290,9 @@ class ScalarLifecycle(LifecycleState):
     def _recompute_pair_mask(self) -> None:
         self._pair_mask = 0
         for (earlier, later), bit_pos in PAIR_BIT_POSITIONS.items():
-            earlier_ts = self._timestamps.get(earlier)
-            later_ts = self._timestamps.get(later)
+            # Normalize for comparison only; stored values keep their original type
+            earlier_ts = _to_naive_utc(self._timestamps.get(earlier))
+            later_ts = _to_naive_utc(self._timestamps.get(later))
             if earlier_ts is not None and later_ts is not None and earlier_ts < later_ts:
                 self._pair_mask |= 1 << bit_pos
 
