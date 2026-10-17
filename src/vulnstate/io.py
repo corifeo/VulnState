@@ -168,10 +168,15 @@ class CVDIO:
                     with contextlib.suppress(ValueError, TypeError):
                         kev_added_at = datetime.fromisoformat(kev_row["dateAdded"])
 
+                kev_due_date = None
+                if kev_row.get("dueDate"):
+                    with contextlib.suppress(ValueError, TypeError):
+                        kev_due_date = datetime.fromisoformat(kev_row["dueDate"])
+
                 # Set kev_entry (this makes vuln.kev return True)
                 vuln.kev_entry = KEVEntry(
                     added_at=kev_added_at,
-                    due_date=kev_row.get("dueDate"),
+                    due_date=kev_due_date,
                     required_action=kev_row.get("requiredAction"),
                     ransomware_use=kev_row.get("knownRansomwareCampaignUse"),
                     notes=kev_row.get("notes"),
@@ -218,7 +223,7 @@ class CVDIO:
             # Resolve URL or local path
             local_path = CVDIO._resolve_source(source)
             # Read from CSV file
-            epss_data = {}
+            epss_data: dict[str, Union[float, dict[str, Any]]] = {}
             with open(local_path, encoding="utf-8") as f:
                 # Skip comment lines (EPSS files start with #model_version...)
                 lines = [line for line in f if not line.startswith("#")]
@@ -228,6 +233,12 @@ class CVDIO:
                     if import_metadata:
                         # Store full row as dict
                         epss_data[cve_id] = dict(row)
+                    elif row.get("percentile"):
+                        # Keep percentile so arr.epss_percentile is populated
+                        epss_data[cve_id] = {
+                            "epss": float(row["epss"]),
+                            "percentile": float(row["percentile"]),
+                        }
                     else:
                         # Just store the score as float
                         epss_data[cve_id] = float(row["epss"])

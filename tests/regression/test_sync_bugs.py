@@ -69,3 +69,56 @@ class TestDataFrameOverwriteRegression:
 
         # CRITICAL: Must preserve the enrichment value, not overwrite with NaN
         assert df.loc[0, "epss"] == pytest.approx(0.5), "to_dataframe must not overwrite enrichment"
+
+
+class TestMixedTimestampTypesRegression:
+    """Guard against TypeError when events come from sources with different datetime types."""
+
+    def test_kev_import_after_tz_aware_events(self, tmp_path):
+        """NVD gives tz-aware datetimes, KEV gives day-precision dates; both must compare."""
+        from datetime import datetime, timezone
+
+        from vulnstate import CVDEvent
+
+        vuln = CVDVulnerability("CVE-2023-0669")
+        vuln.apply_event(CVDEvent.V, timestamp=datetime(2023, 1, 1, tzinfo=timezone.utc))
+        vuln.apply_event(CVDEvent.P, timestamp=datetime(2023, 1, 5, tzinfo=timezone.utc))
+        arr = CVDArray([vuln])
+
+        kev_file = tmp_path / "kev.csv"
+        kev_file.write_text("cveID,dateAdded\nCVE-2023-0669,2023-02-10\n")
+        arr.import_kev(str(kev_file))
+        arr.transform()
+
+        assert arr.is_under_attack[0]
+        assert not arr.is_zero_day_attack[0]
+
+
+class TestEpssPercentileRegression:
+    """Guard against import_epss dropping the CSV percentile column."""
+
+    def test_import_epss_csv_keeps_percentile(self, tmp_path):
+        arr = CVDArray([CVDVulnerability("CVE-2023-0669")])
+
+        epss_file = tmp_path / "epss.csv"
+        epss_file.write_text("cve,epss,percentile\nCVE-2023-0669,0.5,0.9\n")
+        arr.import_epss(str(epss_file))
+        arr.transform()
+
+        assert arr.epss_percentile[0] == pytest.approx(0.9)
+
+
+class TestKevExportRegression:
+    """Guard against JSON export failing on KEV entries imported from CSV."""
+
+    def test_to_json_batch_after_kev_csv_import(self, tmp_path):
+        arr = CVDArray([CVDVulnerability("CVE-2023-0669")])
+
+        kev_file = tmp_path / "kev.csv"
+        kev_file.write_text("cveID,dateAdded,dueDate\nCVE-2023-0669,2023-02-10,2023-03-03\n")
+        arr.import_kev(str(kev_file))
+        arr.transform()
+
+        out = tmp_path / "out.json"
+        arr.to_json_batch(str(out), include_computed=True)
+        assert "2023-03-03" in out.read_text()
