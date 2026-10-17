@@ -6,6 +6,8 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Ever
 
 ## Unreleased
 
+## 0.3.0 (2026-10-17)
+
 ### Fixed
 - Desiderata masks used the 15-bit pair layout instead of `DesiderataBit` order: `where_desiderata_satisfied`/`where_desiderata_violated`, `get_*_desiderata`, `desiderata_mask` and `format_desiderata` reported the wrong desiderata
 - `desiderata_score` now counts desiderata *not violated*; a later event without the earlier one (e.g. X with no V) counts as a violation instead of a pass
