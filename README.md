@@ -64,7 +64,7 @@ vuln.apply_event(CVDEvent.V, timestamp=datetime(2024, 1, 1))   # vendor aware
 vuln.apply_event(CVDEvent.F, timestamp=datetime(2024, 1, 8))   # fix ready
 vuln.apply_event(CVDEvent.P, timestamp=datetime(2024, 2, 1))   # public
 
-vuln.lifecycle.state   # 'VFdPxa'
+vuln.state            # 'VFdPxa'
 vuln.fix_path          # FixPath.FIX_READY
 vuln.threat_state      # ThreatState.DISCLOSED
 vuln.is_zero_day       # False
@@ -121,7 +121,7 @@ Each vulnerability tracks six events. A state like `VFdPxa` means vendor aware, 
 | **X** | Exploit public | any order |
 | **A** | Attacks observed | any order |
 
-That gives 32 valid states out of 64 bit combinations, stored as a `uint8` bitmask. Analytics come from the **timestamps**: the 12 desiderata are the "good" orderings (V before P, F before X, D before A, …), and each CVE is scored on how many it satisfies.
+That gives 32 valid states out of 64 bit combinations, stored as a `uint8` bitmask. Analytics come from the **timestamps**: the 12 desiderata are the "good" orderings (V before P, F before X, D before A, …). Each one is *satisfied* (both events, right order), *violated* (the later event came first, or arrived without the earlier one; an exploit with no vendor awareness is a zero-day) or *pending*. `desiderata_score` is the share not violated.
 
 ## Analytics
 
@@ -134,7 +134,7 @@ On `CVDArray` every property is a NumPy array (after `arr.transform()`), so mask
 | Fix effectiveness | `has_fix_before_exploit`, `has_fix_before_attack`, `has_deployment_before_exploit`, `has_deployment_before_attack` |
 | Threat | `is_weaponized`, `is_under_attack`, `is_private_attack` (A without X), `is_mass_exploitation` |
 | Timing (days) | `disclosure_window_days` (V→P), `fix_lag_days` (V→F), `deployment_lag_days` (F→D) |
-| Scores | `desiderata_score`, `skill_score`, `desiderata_mask`, `fix_path`, `threat_state` |
+| Scores | `desiderata_score`, `desiderata_mask`, `anti_desiderata_mask`, `fix_path`, `threat_state` |
 | Enrichment | `cvss_scores`, `attack_vector`, `epss`, `epss_percentile`, `kev`, `kev_dates` |
 
 ```python
@@ -172,7 +172,19 @@ arr.to_json_batch("snapshot.json", include_computed=True)
 
 Synthetic data for experiments: `CVDArray.generate(10_000, seed=42)` (realistic timelines and CVSS) or `CVDArray.random(n)`.
 
-For a complete, runnable walkthrough, see [`scripts/make_readme_assets.py`](scripts/make_readme_assets.py). It builds every image in this README from the sample data.
+## Examples & notebooks
+
+| | |
+|---|---|
+| [`06_data_science_workflow.ipynb`](examples/06_data_science_workflow.ipynb) | pandas/matplotlib analysis of the NVD sample |
+| [`08_security_analysis.ipynb`](examples/08_security_analysis.ipynb) | zero-days, coordination quality, KEV vs non-KEV |
+| [`09_risk_posture.ipynb`](examples/09_risk_posture.ipynb) | patch prioritization and risk posture |
+| [`examples/01`–`05_*.py`](examples/) | terminal tutorials: basics, batch ops, risk, inference, data import |
+| [`scripts/make_readme_assets.py`](scripts/make_readme_assets.py) | builds every image in this README |
+
+```bash
+uv run python examples/01_getting_started.py
+```
 
 ## Development
 

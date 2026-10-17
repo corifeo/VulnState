@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- Desiderata masks used the 15-bit pair layout instead of `DesiderataBit` order: `where_desiderata_satisfied`/`where_desiderata_violated`, `get_*_desiderata`, `desiderata_mask` and `format_desiderata` reported the wrong desiderata
+- `desiderata_score` now counts desiderata *not violated*; a later event without the earlier one (e.g. X with no V) counts as a violation instead of a pass
+- `is_responsible_disclosure` on `CVDVulnerability`/`analyze()` required P before F (now F before P, matching `CVDArray`)
+- `import_kev` crashed when mixing tz-aware NVD and naive CSV/KEV timestamps
+- `import_epss` dropped the CSV `percentile` column (`epss_percentile` was always 0)
+- `to_json_batch` failed after `import_kev` (KEV `dueDate` stored as string)
+- Restored `CVDVulnerability.state` (alias for `lifecycle.state`)
+- Example scripts and notebooks updated for `transform()` and current API
+
+### Changed
+- `pytest` moved from runtime dependencies to the `dev` group
+
 ## [0.2.0] - 2026-01-20
 
 ### Breaking Changes
