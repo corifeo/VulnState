@@ -189,47 +189,41 @@ class CVDFormatter:
         Returns:
             rich.Table with desiderata satisfaction
         """
-        from .constants import ANTI_DESIDERATA_LABELS, AntiDesiderataBit
+        from .constants import ANTI_DESIDERATA_LABELS, DESIDERATA_LABELS, DesiderataBit
 
         table = Table(title="[bold cyan]Desiderata Satisfaction[/bold cyan]", box=box.ROUNDED)
 
         table.add_column("Desideratum", style=CVDFormatter.COLOR_INFO)
         table.add_column("Status", style=CVDFormatter.COLOR_INFO)
 
-        # Use analyze() to get desiderata masks
+        # Masks use DesiderataBit / AntiDesiderataBit layout (bit i <-> desideratum i)
         analysis = vuln.analyze()
-        anti_mask = analysis.anti_desiderata_mask[0]
-        observed_mask = analysis.pair_observed_mask[0]
+        satisfied_mask = int(analysis.desiderata_mask[0])
+        violated_mask = int(analysis.anti_desiderata_mask[0])
 
         satisfied_count = 0
-        total_count = 0
+        decided_count = 0
 
-        for bit in AntiDesiderataBit:
-            label = ANTI_DESIDERATA_LABELS[bit]
+        for bit in DesiderataBit:
             bit_mask = 1 << bit
-
-            # Check if this pair was observed (both events occurred)
-            pair_observed = (observed_mask & bit_mask) != 0
-            # Check if anti-desideratum is violated
-            violated = (anti_mask & bit_mask) != 0
-
-            if not pair_observed:
-                status_text = "[yellow]○ Pending[/yellow]"
-            elif violated:
-                status_text = "[red bold]✗ Violated[/red bold]"
-            else:
+            if violated_mask & bit_mask:
+                status_text = (
+                    f"[red bold]✗ Violated[/red bold] [dim]({ANTI_DESIDERATA_LABELS[bit]})[/dim]"
+                )
+                decided_count += 1
+            elif satisfied_mask & bit_mask:
                 status_text = "[green bold]✓ Satisfied[/green bold]"
                 satisfied_count += 1
+                decided_count += 1
+            else:
+                status_text = "[yellow]○ Pending[/yellow]"
 
-            if pair_observed:
-                total_count += 1
-
-            table.add_row(label, status_text)
+            table.add_row(DESIDERATA_LABELS[bit], status_text)
 
         # Summary
         table.add_row("", "")
         table.add_row(
-            "[bold]Summary[/bold]", f"[green]{satisfied_count}/{total_count}[/green] observed"
+            "[bold]Summary[/bold]", f"[green]{satisfied_count}/{decided_count}[/green] decided"
         )
 
         return table
