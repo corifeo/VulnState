@@ -24,7 +24,7 @@ console = Console()
 
 def create_sample_dataset(size: int = 500) -> CVDArray:
     """Create sample vulnerability dataset using CVDArray.generate()."""
-    return CVDArray.generate(
+    arr = CVDArray.generate(
         size,
         event_probs={
             CVDEvent.V: 1.0,
@@ -36,6 +36,8 @@ def create_sample_dataset(size: int = 500) -> CVDArray:
         },
         vendors=["Apache", "Microsoft", "Apple", "Linux", "OpenSSL", "Nginx"],
     )
+    arr.transform()  # compute analytics before reading them
+    return arr
 
 
 def section_1_portfolio_overview():
@@ -305,7 +307,7 @@ def main():
         Panel.fit("[bold green]Risk Analysis Complete![/bold green]", border_style="green")
     )
     console.print()
-    console.print("  cvd_workflow.ipynb - Interactive Jupyter notebook")
+    console.print("  09_risk_posture.ipynb - Interactive risk posture notebook")
     console.print()
 
 
