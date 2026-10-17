@@ -51,6 +51,7 @@ class DesiderataExtractor:
         self._threat_state: Optional[np.ndarray] = None
         self._pair_mask: Optional[np.ndarray] = None
         self._validity: Optional[np.ndarray] = None
+        self._desiderata_masks: Optional[tuple[np.ndarray, np.ndarray, np.ndarray]] = None
         self._inferred_mask: Optional[np.ndarray] = None
 
     @classmethod
@@ -145,6 +146,52 @@ class DesiderataExtractor:
 
         return result
 
+    # ==================== Desiderata Masks ====================
+    #
+    # Bit i of each mask is DesiderataBit i / AntiDesiderataBit i (parallel enums),
+    # NOT the 15-bit pair_mask layout. For desideratum (e1 before e2):
+    #   satisfied: both observed and e1 < e2
+    #   violated:  e2 observed and (e1 missing or e2 < e1)
+    #   pending:   neither (e.g. e2 not yet observed)
+
+    def _desiderata_bits(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        from vulnstate.constants import DESIDERATA_PAIR_MAP
+
+        satisfied = np.zeros(self.n, dtype=np.uint16)
+        violated = np.zeros(self.n, dtype=np.uint16)
+        observed = np.zeros(self.n, dtype=np.uint16)
+        for bit, (e1, e2) in DESIDERATA_PAIR_MAP.items():
+            t1 = getattr(self.timestamps, e1.name)
+            t2 = getattr(self.timestamps, e2.name)
+            has1, has2 = self._has(t1), self._has(t2)
+            both = has1 & has2
+            flag = np.uint16(1 << bit)
+            satisfied[both & (t1 < t2)] |= flag
+            violated[has2 & (~has1 | (t2 < t1))] |= flag
+            observed[both] |= flag
+        return satisfied, violated, observed
+
+    @property
+    def satisfied_mask(self) -> np.ndarray:
+        """Satisfied desiderata as uint16 bitmask (DesiderataBit layout)."""
+        if self._desiderata_masks is None:
+            self._desiderata_masks = self._desiderata_bits()
+        return self._desiderata_masks[0]
+
+    @property
+    def violated_mask(self) -> np.ndarray:
+        """Violated desiderata as uint16 bitmask (AntiDesiderataBit layout)."""
+        if self._desiderata_masks is None:
+            self._desiderata_masks = self._desiderata_bits()
+        return self._desiderata_masks[1]
+
+    @property
+    def observed_mask(self) -> np.ndarray:
+        """Desiderata whose two events both occurred (DesiderataBit layout)."""
+        if self._desiderata_masks is None:
+            self._desiderata_masks = self._desiderata_bits()
+        return self._desiderata_masks[2]
+
     # ==================== Validity ====================
 
     @property
@@ -172,13 +219,14 @@ class DesiderataExtractor:
 
     @property
     def desiderata_score(self) -> np.ndarray:
-        """Count of satisfied desiderata (0-12) as uint8 array."""
-        from vulnstate.constants import DESIDERATA_PAIRS_BITS
+        """Count of desiderata not violated (0-12) as uint8 array.
 
-        pair_mask = self.pair_mask
-        scores = np.zeros(self.n, dtype=np.uint8)
-        for bit in DESIDERATA_PAIRS_BITS:
-            scores += ((pair_mask >> bit) & 1).astype(np.uint8)
+        Pending desiderata (later event not yet observed) count as not violated.
+        """
+        violated = self.violated_mask
+        scores = np.full(self.n, 12, dtype=np.uint8)
+        for bit in range(12):
+            scores -= ((violated >> bit) & 1).astype(np.uint8)
         return scores
 
     # ==================== Inference ====================
@@ -221,6 +269,7 @@ class DesiderataExtractor:
         # Invalidate caches
         self._pair_mask = None
         self._validity = None
+        self._desiderata_masks = None
 
         return self
 
@@ -251,7 +300,7 @@ class DesiderataExtractor:
         """
         from vulnstate.constants import get_desiderata_labels
 
-        return [get_desiderata_labels(int(m)) for m in self.pair_mask]
+        return [get_desiderata_labels(int(m)) for m in self.satisfied_mask]
 
     def get_violated_labels(self) -> list[list[str]]:
         """Get labels of violated desiderata (anti-desiderata) for each vulnerability.
@@ -262,8 +311,7 @@ class DesiderataExtractor:
         """
         from vulnstate.constants import get_anti_desiderata_labels
 
-        anti_mask = ~self.pair_mask & 0x0FFF
-        return [get_anti_desiderata_labels(int(m)) for m in anti_mask]
+        return [get_anti_desiderata_labels(int(m)) for m in self.violated_mask]
 
     def where_satisfied(self, *desiderata: int) -> np.ndarray:
         """Return boolean mask where all specified desiderata are satisfied.
@@ -279,7 +327,7 @@ class DesiderataExtractor:
             >>> coordinated = arr.lifecycle.desiderata.where_satisfied(DesiderataBit.D1_V_P)
         """
         required = sum(1 << d for d in desiderata)
-        return (self.pair_mask & required) == required
+        return (self.satisfied_mask & required) == required
 
     def where_violated(self, *anti_desiderata: int) -> np.ndarray:
         """Return boolean mask where all specified anti-desiderata are violated.
@@ -295,8 +343,7 @@ class DesiderataExtractor:
             >>> zero_days = arr.lifecycle.desiderata.where_violated(AntiDesiderataBit.U2_X_V)
         """
         required = sum(1 << a for a in anti_desiderata)
-        anti_mask = ~self.pair_mask & 0x0FFF
-        return (anti_mask & required) == required
+        return (self.violated_mask & required) == required
 
     # ==================== Boolean State Properties ====================
 
@@ -481,24 +528,10 @@ class DesiderataExtractor:
             event_count += has(event_ts).astype(np.uint8)
         is_complete = event_count == 6
 
-        # Group 2: Pair Analysis
-        pair_mask = extractor.pair_mask
-        desiderata_mask = pair_mask
-        anti_desiderata_mask = ~pair_mask & 0x0FFF
-        pair_observed_mask = np.zeros(n, dtype=np.uint16)
-        from vulnstate.constants import PAIR_BIT_POSITIONS, CVDEvent
-
-        ts_dict = {
-            CVDEvent.V: V_ts,
-            CVDEvent.F: F_ts,
-            CVDEvent.D: D_ts,
-            CVDEvent.P: P_ts,
-            CVDEvent.X: X_ts,
-            CVDEvent.A: A_ts,
-        }
-        for (e1, e2), bit_pos in PAIR_BIT_POSITIONS.items():
-            both_observed = has(ts_dict[e1]) & has(ts_dict[e2])
-            pair_observed_mask |= np.where(both_observed, 1 << bit_pos, 0).astype(np.uint16)
+        # Group 2: Desiderata (DesiderataBit / AntiDesiderataBit layout)
+        desiderata_mask = extractor.satisfied_mask
+        anti_desiderata_mask = extractor.violated_mask
+        pair_observed_mask = extractor.observed_mask
 
         # Group 3: Zero-Day Indicators
         is_zero_day_exploit = has(X_ts) & (~has(V_ts) | (X_ts < V_ts))
@@ -508,7 +541,7 @@ class DesiderataExtractor:
         # Group 4: Coordination Quality
         is_coordinated = before(V_ts, P_ts) & has(V_ts) & has(P_ts)
         is_premature_disclosure = has(P_ts) & (~has(F_ts) | (P_ts < F_ts))
-        is_responsible_disclosure = is_coordinated & before(P_ts, F_ts) & has(F_ts)
+        is_responsible_disclosure = is_coordinated & before(F_ts, P_ts) & has(F_ts)
 
         # Group 5: Fix Effectiveness
         has_fix_before_exploit = before(F_ts, X_ts) & has(F_ts)
