@@ -8,7 +8,7 @@
   <img alt="Python 3.9+" src="https://img.shields.io/badge/python-3.9%2B-3776AB?logo=python&logoColor=white">
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green">
   <img alt="Typed" src="https://img.shields.io/badge/types-py.typed-blue">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-692%20passing-brightgreen">
+  <a href="https://github.com/corifeo/vulnstate/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/corifeo/vulnstate/actions/workflows/ci.yml/badge.svg"></a>
   <img alt="Data: NVD · EPSS · KEV" src="https://img.shields.io/badge/data-NVD%20%C2%B7%20EPSS%20%C2%B7%20KEV-orange">
 </p>
 
@@ -188,7 +188,7 @@ Issues and PRs are welcome, especially new data importers (OSV, GitHub Security 
 
 ## Citation
 
-vulnstate implements the model from:
+vulnstate implements the model below. To cite vulnstate itself, use **Cite this repository** on GitHub ([`CITATION.cff`](CITATION.cff)).
 
 > Householder, A. D., & Spring, J. (2021). *A State-Based Model for Multi-Party Coordinated Vulnerability Disclosure (MPCVD)*. CMU/SEI-2021-SR-021. Software Engineering Institute, Carnegie Mellon University.
 
