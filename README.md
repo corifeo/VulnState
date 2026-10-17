@@ -206,4 +206,4 @@ vulnstate implements the model below. To cite vulnstate itself, use **Cite this 
 
 ## License
 
-MIT
+[MIT](LICENSE)
