@@ -194,7 +194,7 @@ def section_3_kev_enrichment():
         if vuln.kev and shown < 5:
             table.add_row(
                 vuln.cve_id,
-                vuln.state_str,
+                vuln.state,
                 f"{vuln.cvss_score:.1f}",
                 "[red]YES[/red]",
             )
@@ -274,7 +274,7 @@ def section_4_combined_enrichment():
             f"{vuln.cvss_score:.1f}",
             f"{epss:.4f}",
             kev_status,
-            vuln.state_str,
+            vuln.state,
         )
 
     console.print(table)
@@ -396,8 +396,8 @@ def main():
         Panel.fit("[bold green]Data Import Demo Complete![/bold green]", border_style="green")
     )
     console.print()
-    console.print("  data_science_workflow.ipynb - Statistical analysis notebook")
-    console.print("  security_analysis.ipynb     - Risk assessment notebook")
+    console.print("  06_data_science_workflow.ipynb - Statistical analysis notebook")
+    console.print("  08_security_analysis.ipynb    - Security analysis notebook")
     console.print()
 
 

@@ -276,7 +276,7 @@ def section_6_next_steps():
     console.print()
     console.print("  02_batch_operations.py - Vectorized filtering and analysis")
     console.print("  03_risk_analysis.py    - Risk assessment workflow")
-    console.print("  cvd_workflow.ipynb     - Interactive Jupyter notebook")
+    console.print("  06_data_science_workflow.ipynb - Interactive Jupyter notebook")
     console.print()
 
 
