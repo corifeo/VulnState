@@ -6,6 +6,9 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Ever
 
 ## Unreleased
 
+### Added
+- README case study: PHP2Shell (CVE-2026-109618, CVE-2026-109619) disclosure timeline scored by vulnstate, with a generated screenshot
+
 ## 0.3.0 (2026-10-17)
 
 ### Fixed
