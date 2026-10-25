@@ -177,6 +177,113 @@ def make_triage_svg(arr: CVDArray) -> None:
     )
 
 
+# ----------------------------------------------------------------- php2shell.svg
+
+# Same timeline as the README case study. Events with no published time are 00:00 UTC.
+PHP2SHELL_TIMELINE = [  # (event, timestamp, shown date, what happened)
+    (CVDEvent.V, datetime(2026, 8, 11, 0, 0), "11 Aug 00:00 UTC", "Calif reports the bugs to PHP"),
+    (
+        CVDEvent.A,
+        datetime(2026, 10, 17, 0, 0),
+        "17 Oct 00:00 UTC",
+        "Amazon MadPot sees first attempt",
+    ),
+    (
+        CVDEvent.P,
+        datetime(2026, 10, 20, 15, 20),
+        "20 Oct 15:20 UTC",
+        "Hacker News post leaks CVE IDs",
+    ),
+    (
+        CVDEvent.X,
+        datetime(2026, 10, 21, 2, 0),
+        "21 Oct 02:00 UTC",
+        "Amazon sees first PoC exploits",
+    ),
+    (
+        CVDEvent.F,
+        datetime(2026, 10, 21, 13, 34),
+        "21 Oct 13:34 UTC",
+        "PHP publishes advisories + fixes",
+    ),
+]
+
+
+def make_php2shell_svg() -> None:
+    """PHP2Shell (CVE-2026-109618/-109619) disclosure timeline scored by vulnstate."""
+    vuln = CVDVulnerability("CVE-2026-109618", cvss_score=9.2)
+    for event, ts, _, _ in PHP2SHELL_TIMELINE:
+        vuln.apply_event(event, timestamp=ts)
+    arr = CVDArray([vuln])
+    arr.transform()
+
+    names = {
+        CVDEvent.V: "V  vendor aware",
+        CVDEvent.F: "F  fix ready",
+        CVDEvent.P: "P  public",
+        CVDEvent.X: "X  exploit public",
+        CVDEvent.A: "A  attacks",
+    }
+    timeline = Table(box=box.ROUNDED, header_style="bold cyan", title="Disclosure timeline")
+    for col in ["Event", "Date (2026)", "What happened"]:
+        timeline.add_column(col, no_wrap=True)
+    for event, _, shown, what in PHP2SHELL_TIMELINE:
+        timeline.add_row(Text(names[event], style="magenta"), shown, what)
+    timeline.add_row(Text("D  deployed", style="magenta"), "-", "n/a")
+
+    violated = len(arr.get_violated_desiderata()[0])
+    satisfied = len(arr.get_satisfied_desiderata()[0])
+    score = float(arr.desiderata_score[0])
+    attacks_before_disclosure = bool(arr.anti_desiderata_mask[0] & (1 << 10))  # U11_A_P
+
+    analytics = Table(box=box.ROUNDED, header_style="bold cyan", title="What vulnstate infers")
+    analytics.add_column("Metric", no_wrap=True)
+    analytics.add_column("Result", justify="center", no_wrap=True)
+    for name, cell in [
+        ("State", Text(str(arr.states[0]), style="bold")),
+        ("Coordinated (V before P)", yes_no(bool(arr.is_coordinated[0]), False)),
+        ("Premature disclosure (P before F)", yes_no(bool(arr.is_premature_disclosure[0]), True)),
+        ("Fix before exploit", yes_no(bool(arr.has_fix_before_exploit[0]), False)),
+        ("Fix before attacks", yes_no(bool(arr.has_fix_before_attack[0]), False)),
+        ("Attacks before disclosure", yes_no(attacks_before_disclosure, True)),
+        ("Zero-day (X/A before V)", yes_no(bool(arr.is_zero_day[0]), True)),
+        (
+            "Desiderata",
+            Text.assemble(
+                (f"{satisfied} met", "green"),
+                " / ",
+                (f"{violated} violated", "red"),
+                f" / {12 - satisfied - violated} pending",
+            ),
+        ),
+        (Text("Desiderata score", style="bold"), Text(f"{score:.2f}", style="bold red")),
+    ]:
+        analytics.add_row(name, cell)
+
+    header = Text.assemble(
+        (">>> ", "dim"),
+        "PHP2Shell  CVE-2026-109618 / CVE-2026-109619  CVSS v4 9.2",
+        ("   # as of 25 Oct 2026", "dim"),
+    )
+    footer = Text.assemble(
+        ("CISA KEV: ", "bold"),
+        ("not listed", "yellow"),
+        " (catalog 2026-10-23)   ",
+        ("EPSS 24 Oct: ", "bold"),
+        "0.118 (p96) / 0.062 (p94)",
+    )
+    # Size the terminal to the widest block so nothing wraps
+    wide = recording_console(300)
+    width = max(
+        Measurement.get(wide, wide.options, r).maximum
+        for r in (timeline, analytics, header, footer)
+    )
+    console = recording_console(width)
+    for renderable in (header, Text(""), timeline, analytics, footer):
+        console.print(renderable)
+    console.save_svg(str(ASSETS / "php2shell.svg"), title="vulnstate · PHP2Shell case study")
+
+
 # ---------------------------------------------------------- fix_threat_*.png
 
 # Reference palette: sequential blue ramp + light/dark chart chrome
@@ -282,6 +389,7 @@ def make_heatmap(arr: CVDArray) -> None:
 def main() -> None:
     ASSETS.mkdir(parents=True, exist_ok=True)
     make_lifecycle_svg()
+    make_php2shell_svg()
     arr = load_real_dataset()
     make_triage_svg(arr)
     make_heatmap(arr)
