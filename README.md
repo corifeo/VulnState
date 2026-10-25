@@ -16,6 +16,7 @@
   <a href="#installation">Install</a> ·
   <a href="#quick-start">Quick start</a> ·
   <a href="#triage-real-data-in-10-lines">Real-data triage</a> ·
+  <a href="#case-study-php2shell-october-2026">PHP2Shell case study</a> ·
   <a href="#the-model">The model</a> ·
   <a href="#analytics">Analytics</a> ·
   <a href="#data-import">Data import</a>
@@ -107,6 +108,35 @@ Each CVE sits on two axes, remediation progress (V→F→D) and threat (P→X→
   <source media="(prefers-color-scheme: dark)" srcset=".github/assets/fix_threat_dark.png">
   <img src=".github/assets/fix_threat_light.png" alt="Heatmap of 770 real 2023 CVEs by fix path and threat state">
 </picture>
+
+## Case study: PHP2Shell (October 2026)
+
+[PHP2Shell](https://en.wikipedia.org/wiki/PHP2Shell) is two unauthenticated RCE bugs in PHP itself, CVE-2026-109618 and CVE-2026-109619 (CVSS v4.0 9.2). PHP knew for two months, but someone was attacking it before the CVE IDs leaked, and the leak came a day before the fix:
+
+```python
+from datetime import datetime
+from vulnstate import CVDEvent, CVDVulnerability
+
+php2shell = CVDVulnerability("CVE-2026-109618", cvss_score=9.2)
+php2shell.apply_event(CVDEvent.V, timestamp=datetime(2026, 8, 11, 0, 0))     # reported to PHP
+php2shell.apply_event(CVDEvent.A, timestamp=datetime(2026, 10, 17, 0, 0))    # first attack seen
+php2shell.apply_event(CVDEvent.P, timestamp=datetime(2026, 10, 20, 15, 20))  # HN post leaks CVE IDs
+php2shell.apply_event(CVDEvent.X, timestamp=datetime(2026, 10, 21, 2, 0))    # first PoC exploits
+php2shell.apply_event(CVDEvent.F, timestamp=datetime(2026, 10, 21, 13, 34))  # fixed releases
+
+php2shell.is_coordinated            # True:  PHP knew two months ahead
+php2shell.is_premature_disclosure   # True:  public before the fix
+php2shell.has_fix_before_exploit    # False: PoCs beat the fix by ~11.5 hours
+php2shell.is_zero_day               # False: never exploited before PHP knew
+```
+
+<p align="center">
+  <img src=".github/assets/php2shell.svg" alt="PHP2Shell disclosure timeline scored by vulnstate" width="85%">
+</p>
+
+Coordination itself worked; what failed was secrecy. Attacks on 17 Oct predate both the leak and any public exploit, so 8 of the 12 desiderata are violated (score 0.33). The embargo then broke twice: a Hacker News post leaked the CVE IDs on 20 Oct, and Chainguard published fixed images at 07:41 UTC on 21 Oct, six hours before PHP's release. As of 23 Oct neither CVE is in CISA KEV; EPSS (24 Oct) is 0.118 for CVE-2026-109618 and 0.062 for CVE-2026-109619.
+
+<sub>Timeline as of 25 Oct 2026 from [Hacker News](https://news.ycombinator.com/item?id=50167754), the [PHP Foundation](https://thephp.foundation/blog/2026/10/21/todays-php-security-release-and-how-were-strengthening-php-security/), [Amazon Threat Intelligence](https://aws.amazon.com/blogs/security/amazon-threat-intelligence-identifies-php2shell-exploitation-prior-to-public-disclosure-in-madpot/) and [Calif](https://calif.io/php2shell.x/), consistent with [Wikipedia](https://en.wikipedia.org/wiki/PHP2Shell). V and A have no published time and are recorded as 00:00 UTC.</sub>
 
 ## The model
 
